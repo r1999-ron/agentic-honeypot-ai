@@ -191,8 +191,15 @@ def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
-    if not request.message.text or not request.message.text.strip():
-        raise HTTPException(status_code=400, detail="Empty message text")
+    if request is None or request.message is None:
+        return {
+            "status": "success",
+            "scamDetected": False,
+            "reply": "Honeypot endpoint is active",
+            "conversation": [],
+            "extractedIntelligence": {},
+            "totalMessages": 0
+        }
 
     session_id = request.sessionId
 
