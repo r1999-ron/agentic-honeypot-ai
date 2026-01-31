@@ -79,10 +79,10 @@ class Metadata(BaseModel):
 
 
 class HoneypotRequest(BaseModel):
-    sessionId: str
-    message: Message
-    conversationHistory: List[Message]
-    metadata: Optional[Metadata]
+    sessionId: Optional[str] = None
+    message: Optional[Message] = None
+    conversationHistory: Optional[List[Message]] = None
+    metadata: Optional[Metadata] = None
 
 
 class HoneypotResponse(BaseModel):
@@ -191,7 +191,7 @@ def honeypot(request: Optional[HoneypotRequest] = Body(None),x_api_key: str = He
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
-    if request is None or request.message is None:
+    if request is None or request.sessionId is None or request.message is None:
         return {
             "status": "success",
             "scamDetected": False,
