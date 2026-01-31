@@ -79,10 +79,10 @@ class Metadata(BaseModel):
 
 
 class HoneypotRequest(BaseModel):
-    sessionId: Optional[str] = None
-    message: Optional[Message] = None
-    conversationHistory: Optional[List[Message]] = None
-    metadata: Optional[Metadata] = None
+    sessionId: str
+    message: Message
+    conversationHistory: List[Message] = []
+    metadata: Optional[Metadata]
 
 
 class HoneypotResponse(BaseModel):
@@ -187,19 +187,9 @@ def send_to_guvi(session_id, scam_detected, total_messages, intelligence):
 # ----------------- API -----------------
 
 @app.post("/honeypot", response_model=HoneypotResponse)
-def honeypot(request: Optional[HoneypotRequest] = Body(None),x_api_key: str = Header(None)):
+def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
-
-    if request is None or request.sessionId is None or request.message is None:
-        return {
-            "status": "success",
-            "scamDetected": False,
-            "reply": "Honeypot endpoint is active",
-            "conversation": [],
-            "extractedIntelligence": {},
-            "totalMessages": 0
-        }
 
     session_id = request.sessionId
 
@@ -259,6 +249,24 @@ def honeypot(request: Optional[HoneypotRequest] = Body(None),x_api_key: str = He
         "conversation": session_memory[session_id],
         "extractedIntelligence": session_intelligence[session_id],
         "totalMessages": len(session_memory[session_id])
+    }
+
+# =====================================================
+# TEST ENDPOINT (NO BODY / {} ALLOWED)
+# =====================================================
+
+@app.post("/honeypot/test")
+def honeypot_test(x_api_key: str = Header(None)):
+    if x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    return {
+        "status": "success",
+        "scamDetected": False,
+        "reply": "Honeypot endpoint is active and reachable",
+        "conversation": [],
+        "extractedIntelligence": {},
+        "totalMessages": 0
     }
 
 @app.get("/")
