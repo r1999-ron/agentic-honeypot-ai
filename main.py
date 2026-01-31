@@ -7,6 +7,7 @@ from openai import OpenAI
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import HTTPException as FastAPIHTTPException
 from fastapi import Request
+from fastapi import Body
 
 API_KEY = "sk_test_123456789"
 GUVI_CALLBACK_URL = "https://hackathon.guvi.in/api/updateHoneyPotFinalResult"
@@ -186,8 +187,7 @@ def send_to_guvi(session_id, scam_detected, total_messages, intelligence):
 # ----------------- API -----------------
 
 @app.post("/honeypot", response_model=HoneypotResponse)
-def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
-
+def honeypot(request: Optional[HoneypotRequest] = Body(None),x_api_key: str = Header(None)):
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
