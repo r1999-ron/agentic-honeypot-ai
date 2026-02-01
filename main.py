@@ -328,9 +328,12 @@ def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
 # =====================================================
 
 @app.post("/honeypot/test")
-def honeypot_test(payload: dict = Body(default={}), x_api_key: str = Header(None)):
+async def honeypot_test(
+    request: Request,
+    x_api_key: str = Header(None)
+):
     if x_api_key != API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid API key")
+        raise HTTPException(status_code=401)
 
     return {
         "status": "success",
