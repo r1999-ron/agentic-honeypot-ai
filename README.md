@@ -244,7 +244,7 @@ Once engagement completes, the system sends:
 
 ✅ Conversation limits enforced
 
-⚙️ Configuration
+# ⚙️ Configuration
 MAX_TURNS = 10  # Safety cap
 OPENAI_MODEL = "gpt-4o-mini"
 
