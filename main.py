@@ -1,5 +1,5 @@
 from threading import Thread
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Body
 from pydantic import BaseModel
 from typing import List, Optional
 import time, os, re, requests
@@ -328,7 +328,7 @@ def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
 # =====================================================
 
 @app.post("/honeypot/test")
-def honeypot_test(x_api_key: str = Header(None)):
+def honeypot_test(payload: dict = Body(default={}), x_api_key: str = Header(None)):
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
