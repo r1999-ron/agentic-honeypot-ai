@@ -327,6 +327,7 @@ def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
 # TEST ENDPOINT (NO BODY / {} ALLOWED)
 # =====================================================
 
+# API test point
 @app.post("/honeypot/test")
 async def honeypot_test(
     request: Request,
