@@ -7,11 +7,12 @@ from openai import OpenAI
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import HTTPException as FastAPIHTTPException
 from fastapi import Request
-from fastapi import Body
+import random
 
 API_KEY = "sk_test_123456789"
 GUVI_CALLBACK_URL = "https://hackathon.guvi.in/api/updateHoneyPotFinalResult"
 OPENAI_MODEL = "gpt-4o-mini"
+MAX_TURNS = 10  # safety cap
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
@@ -37,12 +38,12 @@ Never say you are detecting scam.
 Always sound human and genuine.
 """
 
-# ------------------APP--------------------------------
+# ------------------ APP ---------------------------------------------------------------
 
 app = FastAPI(title="Agentic Honeypot API")
 
 
-# ----------- ERROR HANDLING --------------------------
+# ----------- ERROR HANDLING -----------------------------------------------------------
 
 @app.exception_handler(FastAPIHTTPException)
 async def http_exception_handler(request: Request, exc: FastAPIHTTPException):
@@ -58,14 +59,16 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"status": "error", "message": "Internal server error"},
     )
 
-# ----------------MEMORY----------------------------------
+# ---------------- MEMORY -------------------------------------------------------------------
 
 session_memory = {}
 session_intelligence = {}
 session_start_time = {}
 session_finalized = {}
+session_is_scam = {}
+session_last_intel_snapshot = {}
 
-# ------------------MODELS--------------------------------------
+# ------------------ MODELS --------------------------------------------------------------------
 
 class Message(BaseModel):
     sender: str
@@ -87,27 +90,23 @@ class HoneypotRequest(BaseModel):
 
 class HoneypotResponse(BaseModel):
     status: str
-    scamDetected: bool
     reply: str
-    conversation: list
-    extractedIntelligence: dict
-    totalMessages: int
 
-# -------------------SCAM DETECTION -----------------------------------------
+# ------------------- SCAM DETECTION -----------------------------------------------------------
 
 SCAM_KEYWORDS = [
     # Authentication / urgency
     "otp", "otpp",
     "kyc", "kycupdate", "kycverify",
     "verify", "verfy", "verifiy",
-    "urgent", "immediate", "immidiate", "asap",
+    "urgent", "immediate", "immidiate", "asap", "arrest", "warrant"
     "blocked", "blockd", "locked", "suspend", "suspnd",
 
     # Banking / payment
     "bank", "banck", "bnk",
     "account", "acount", "accnt",
     "upi", "upii", "upiid",
-    "refund", "cashback",
+    "refund", "cashback", "payment",
 
     # Phishing actions
     "click", "clk",
@@ -119,6 +118,21 @@ SCAM_KEYWORDS = [
     "prize", "lottery", "winner"
 ]
 
+URGENT_PATTERNS = [
+    r"verify\s*(now|immediately)",
+    r"account.*(block|blocked|suspend|suspended)",
+    r"immediate action",
+    r"within\s*\d+\s*(minutes|hours)",
+    r"act\s*now",
+]
+
+FALLBACK_BAITS = [
+    "Can you tell me exactly where I need to verify this?",
+    "Is there a number or app where I should complete this?",
+    "Do I need to pay something or just confirm details?",
+    "Can you please guide me step by step? I am not very technical."
+]
+
 def normalize_text(text: str) -> str:
     text = text.lower()
     text = re.sub(r'[^a-z0-9\s]', ' ', text)  # remove symbols
@@ -128,7 +142,13 @@ def normalize_text(text: str) -> str:
 def detect_scam(text: str):
     text_norm = normalize_text(text)
 
+    # Keyword-based detection
     matches = sum(1 for word in SCAM_KEYWORDS if word in text_norm)
+
+    # Urgency pattern detection
+    if any(re.search(p, text_norm) for p in URGENT_PATTERNS):
+        confidence = min(0.75 + matches * 0.05, 0.95)
+        return True, confidence
 
     if matches >= 2:
         confidence = min(0.7 + matches * 0.05, 0.95)
@@ -137,7 +157,7 @@ def detect_scam(text: str):
     return False, 0.3
 
 
-# ---------------------- AGENT---------------------------------------------------
+# ---------------------- AGENT -----------------------------------------------------------------
 
 def generate_agent_reply(history):
     messages = [{"role": "system", "content": PERSONA_PROMPT}]
@@ -153,30 +173,60 @@ def generate_agent_reply(history):
         return response.choices[0].message.content
     except Exception:
         # Fallback response (very important)
-        return "I am a bit confused. Can you please explain once again?"
+        return random.choice(FALLBACK_BAITS)
 
-# --------------------- INTELLIGENCE EXTRACTION ----------------------------------------
+# --------------------- INTELLIGENCE EXTRACTION --------------------------------------------------
 
-def extract_intelligence(text):
-    return{
-        "upiIds": re.findall(r'[\w\.-]+@[\w]+', text),
-        "bankAccounts": re.findall(r'\b\d{9,18}\b', text),
-        "phoneNumbers": re.findall(r'\+?\d{10,13}', text),
-        "phishingLinks": re.findall(r'https?://\S+', text),
-        "suspiciousKeywords": [k for k in SCAM_KEYWORDS if k in normalize_text(text)]
+def extract_intelligence(text: str):
+    text_lower = text.lower()
+
+    phone_numbers = []
+    bank_accounts = []
+
+    # 1️⃣ +91 numbers
+    plus_phones = re.findall(r'\+91\d{10}', text)
+    phone_numbers.extend(plus_phones)
+
+    cleaned_text = text
+    for p in plus_phones:
+        cleaned_text = cleaned_text.replace(p, "")
+
+    # 2️⃣ 12-digit numbers starting with 91 (phone without +)
+    cc_phones = re.findall(r'\b91\d{10}\b', cleaned_text)
+    phone_numbers.extend(cc_phones)
+
+    cleaned_text = re.sub(r'\b91\d{10}\b', '', cleaned_text)
+
+    # 3️⃣ 10-digit phone numbers
+    ten_digit_phones = re.findall(r'\b\d{10}\b', cleaned_text)
+    phone_numbers.extend(ten_digit_phones)
+
+    cleaned_text = re.sub(r'\b\d{10}\b', '', cleaned_text)
+
+    # 4️⃣ Bank accounts (12–18 digits, context-aware)
+    if any(k in text_lower for k in ["bank", "account", "acc", "a/c"]):
+        bank_accounts = re.findall(r'\b\d{12,18}\b', cleaned_text)
+
+    return {
+        "phoneNumbers": list(set(phone_numbers)),
+        "bankAccounts": list(set(bank_accounts)),
+        "upiIds": list(set(re.findall(r'\b[a-z0-9.\-_]{2,}@[a-z]{2,}\b', text))),
+        "phishingLinks": re.findall(r'https?://[^\s<>"\)\]]+', text),
+        "suspiciousKeywords": [k for k in SCAM_KEYWORDS if k in text_lower]
     }
 
-# ---------------------- CALLBACK -------------------------------------------------------
+# ---------------------- CALLBACK -------------------------------------------------------------------
 
-def send_to_guvi(session_id, scam_detected, total_messages, intelligence):
+def send_to_guvi(session_id, scam_detected, total_messages, intelligence, confidence):
     def task():
         payload = {
             "sessionId": session_id,
             "scamDetected": scam_detected,
             "totalMessagesExchanged": total_messages,
             "extractedIntelligence": intelligence,
-            "agentNotes": "Scammer used urgency and payment redirection tactics."
+            "agentNotes": f"Scammer used urgency tactics and payment redirection. Detection confidence: {confidence}"
         }
+        print("🚀 FINAL CALLBACK PAYLOAD:", payload)
         try:
             requests.post(GUVI_CALLBACK_URL, json=payload, timeout=3)
         except Exception as e:
@@ -184,7 +234,7 @@ def send_to_guvi(session_id, scam_detected, total_messages, intelligence):
 
     Thread(target=task, daemon=True).start()
 
-# ----------------- API -----------------
+# ----------------- API ----------------------------------------------------------------------------------
 
 @app.post("/honeypot", response_model=HoneypotResponse)
 def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
@@ -194,14 +244,21 @@ def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
     session_id = request.sessionId
 
     if session_id not in session_memory:
-        session_memory[session_id] = [{"role": "user", "content": m.text}
-        for m in request.conversationHistory]
+        session_memory[session_id] = [
+            {
+                "role": "assistant" if m.sender == "user" else "user",
+                "content": m.text
+            }
+            for m in request.conversationHistory
+        ]
         session_intelligence[session_id] = {
             "upiIds": [], "bankAccounts": [], "phoneNumbers": [],
             "phishingLinks": [], "suspiciousKeywords": []
         }
         session_start_time[session_id] = time.time()
         session_finalized[session_id] = False
+        session_is_scam[session_id] = False
+        session_last_intel_snapshot[session_id] = set()
 
     # Add scammer message
     session_memory[session_id].append({
@@ -210,9 +267,15 @@ def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
     })
 
     # Cap memory to last 10 messages
-    session_memory[session_id] = session_memory[session_id][-10:]
+    session_memory[session_id] = session_memory[session_id][-MAX_TURNS:]
 
-    is_scam , _ = detect_scam(request.message.text)
+    detected, confidence = detect_scam(request.message.text)
+
+    # Once scam, always scam (session-level)
+    if detected:
+        session_is_scam[session_id] = True
+
+    is_scam = session_is_scam[session_id]
 
     # Agent reply
     if is_scam:
@@ -221,34 +284,43 @@ def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
             "role": "assistant",
             "content": agent_reply
         })
-        session_memory[session_id] = session_memory[session_id][-10:]
+        session_memory[session_id] = session_memory[session_id][-MAX_TURNS:]
     else:
         agent_reply = "Okay, noted."
 
     # Extract intelligence
-    new_intel = extract_intelligence(request.message.text)
-    for key in session_intelligence[session_id]:
-        session_intelligence[session_id][key].extend(new_intel[key])
-        session_intelligence[session_id][key] = list(set(session_intelligence[session_id][key]))
+    intel = extract_intelligence(request.message.text)
+    for k in session_intelligence[session_id]:
+        session_intelligence[session_id][k] = list(set(session_intelligence[session_id][k] + intel[k]))
+
+    # detect intel stability
+    snapshot = set()
+
+    for k in ["upiIds", "phishingLinks", "phoneNumbers", "bankAccounts"]:
+        for v in session_intelligence[session_id][k]:
+            snapshot.add(f"{k}:{v}")
+
+    new_intel = snapshot != session_last_intel_snapshot[session_id]
+    session_last_intel_snapshot[session_id] = snapshot
 
     # Finalize if useful info found
-    if (is_scam and not session_finalized[session_id] and (session_intelligence[session_id]["upiIds"] or session_intelligence[session_id]["phishingLinks"])):
-        total_messages = len(session_memory[session_id])
-        send_to_guvi(
-            session_id,
-            is_scam,
-            total_messages,
-            session_intelligence[session_id]
-        )
-        session_finalized[session_id] = True
+    if is_scam and not session_finalized[session_id]:
+        score = sum(bool(session_intelligence[session_id][k]) for k in ["upiIds","phishingLinks","phoneNumbers","bankAccounts"])
+        total = len(session_memory[session_id])
+
+        if (score >= 2 and not new_intel) or total >= MAX_TURNS:
+            send_to_guvi(
+                session_id,
+                True,
+                total,
+                session_intelligence[session_id],
+                confidence
+            )
+            session_finalized[session_id] = True
 
     return {
         "status": "success",
-        "scamDetected": is_scam,
-        "reply": agent_reply,
-        "conversation": session_memory[session_id],
-        "extractedIntelligence": session_intelligence[session_id],
-        "totalMessages": len(session_memory[session_id])
+        "reply": agent_reply
     }
 
 # =====================================================
