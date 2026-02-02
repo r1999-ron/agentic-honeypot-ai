@@ -1,13 +1,17 @@
-from threading import Thread
-from fastapi import FastAPI, Header, HTTPException, Body
-from pydantic import BaseModel
-from typing import List, Optional
-import time, os, re, requests
-from openai import OpenAI
-from fastapi.responses import JSONResponse
-from fastapi.exceptions import HTTPException as FastAPIHTTPException
-from fastapi import Request
+import os
 import random
+import re
+import requests
+import time
+from threading import Thread
+from typing import List, Optional
+
+from fastapi import FastAPI, Header, HTTPException, Body
+from fastapi import Request
+from fastapi.exceptions import HTTPException as FastAPIHTTPException
+from fastapi.responses import JSONResponse
+from openai import OpenAI
+from pydantic import BaseModel
 
 API_KEY = "sk_test_123456789"
 GUVI_CALLBACK_URL = "https://hackathon.guvi.in/api/updateHoneyPotFinalResult"
@@ -99,7 +103,7 @@ SCAM_KEYWORDS = [
     "otp", "otpp",
     "kyc", "kycupdate", "kycverify",
     "verify", "verfy", "verifiy",
-    "urgent", "immediate", "immidiate", "asap", "arrest", "warrant"
+    "urgent", "immediate", "immidiate", "asap", "arrest", "warrant",
     "blocked", "blockd", "locked", "suspend", "suspnd",
 
     # Banking / payment
@@ -329,7 +333,7 @@ def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
 
 # API test point
 @app.post("/honeypot/guvi-test")
-async def honeypot_test(x_api_key: str = Header(None)):
+async def honeypot_test(_: dict = Body(...), x_api_key: str = Header(None)):
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
