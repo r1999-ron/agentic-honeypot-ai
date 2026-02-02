@@ -221,8 +221,8 @@ Once engagement completes, the system sends:
   "totalMessagesExchanged": 8,
   "extractedIntelligence": {
     "upiIds": ["bankhelp@upi"],
-    "phoneNumbers": ["+919876543210"],
-    "phishingLinks": ["https://secure-bank-verify.example/login"],
+    "phoneNumbers": ["+91XXXXXXX"],
+    "phishingLinks": ["https://XXXXXXXXXXXXX"],
     "bankAccounts": ["123456789012"],
     "suspiciousKeywords": ["verify", "blocked", "urgent"]
   },
