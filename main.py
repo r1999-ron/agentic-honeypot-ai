@@ -50,7 +50,7 @@ Use simple Indian English expressions like "Sir/Madam", "Please help me", "I am 
 app = FastAPI(title="Agentic Honeypot API")
 
 
-# ----------- ERROR HANDLING -----------------------------------------------------------
+# ----------- ERROR HANDLING PROCESS-----------------------------------------------------------
 
 @app.exception_handler(FastAPIHTTPException)
 async def http_exception_handler(request: Request, exc: FastAPIHTTPException):

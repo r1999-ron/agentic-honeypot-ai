@@ -97,6 +97,30 @@ class HoneypotTester:
             return False
 
 
+def test_video_call_scam():
+    """Test Scenario: Video Call KYC Scam"""
+    print("\n" + "=" * 60)
+    print("📹 TEST SCENARIO: VIDEO CALL KYC SCAM")
+    print("=" * 60)
+
+    tester = HoneypotTester(API_BASE_URL, API_KEY)
+
+    messages = [
+        "Sir, join video call for immediate KYC verification",
+        "Your account blocked. Video verification needed urgently on WhatsApp",
+        "Show your documents on video call to reactivate account",
+        "Video call mandatory for government subsidy verification"
+    ]
+
+    for msg in messages:
+        result = tester.send_message(msg)
+        if result and "error" not in result:
+            print(f"✅ Scam detected and agent engaged naturally")
+        else:
+            print(f"❌ Failed to process message properly")
+        time.sleep(2)
+
+
 def test_scenario_1_bank_fraud():
     """Test Scenario 1: Classic Bank Fraud"""
     print("\n" + "=" * 60)
@@ -152,6 +176,26 @@ def test_scenario_3_non_scam():
         "Hello, how are you today?",
         "What's the weather like?",
         "Can you help me with directions?"
+    ]
+
+    for msg in messages:
+        tester.send_message(msg)
+        time.sleep(2)
+
+
+def test_government_scams():
+    """Test Scenario: Government Scheme Scams"""
+    print("\n" + "=" * 60)
+    print("🏛️ TEST SCENARIO: GOVERNMENT SCAMS")
+    print("=" * 60)
+
+    tester = HoneypotTester(API_BASE_URL, API_KEY)
+
+    messages = [
+        "PM Modi announced Digital India subsidy. Verify Aadhaar now.",
+        "COVID vaccination certificate expired. Update immediately.",
+        "PM Kisan scheme payment pending. Video call required for verification.",
+        "Income tax refund available. Click link: http://fake-income-tax.gov.in"
     ]
 
     for msg in messages:
@@ -276,8 +320,10 @@ def main():
 
     # Run all test scenarios
     test_api_endpoints()
+    test_video_call_scam()  # NEW: Test video call scam detection
     test_scenario_1_bank_fraud()
     test_scenario_2_phishing_links()
+    test_government_scams()  # NEW: Test government scams
     test_scenario_3_non_scam()
     test_error_cases()
     run_performance_test()
@@ -287,6 +333,7 @@ def main():
     print("=" * 60)
     print("\n💡 What to look for:")
     print("- Agent should engage naturally with scam messages")
+    print("- Should detect video call, KYC, and government scams")
     print("- Should extract phone numbers, UPI IDs, links, bank accounts")
     print("- Should maintain conversation context")
     print("- Should finalize and send callback when enough intel is gathered")
