@@ -211,7 +211,7 @@ def generate_agent_reply(history, metadata=None):
     # Enhance based on metadata
     if metadata:
         if metadata.channel == "SMS":
-            persona += "\nKeep responses short as this is SMS."
+            persona += "\nYou are receiving this via SMS, so keep responses concise."
         if metadata.locale == "IN":
             persona += "\nUse more Indian context and expressions."
 
