@@ -123,6 +123,11 @@ SCAM_KEYWORDS = [
     "urgent", "immediate", "immidiate", "asap", "arrest", "warrant",
     "blocked", "blockd", "locked", "suspend", "suspnd",
 
+    # Video call scams (NEW)
+    "video call", "videocall", "video verification",
+    "video verify", "video kyc", "join call",
+    "whatsapp video", "show documents",
+
     # Banking / payment
     "bank", "banck", "bnk",
     "account", "acount", "accnt",
