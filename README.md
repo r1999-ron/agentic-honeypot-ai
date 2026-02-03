@@ -11,21 +11,21 @@ Static rule-based detection systems fail because scammers change tactics dynamic
 
 This project implements an Agentic Honeypot that:
 
-Detects scam intent early
+* Detects scam intent early
 
-Engages scammers autonomously using a believable human persona
+* Engages scammers autonomously using a believable human persona
 
-Handles multi-turn conversations
+* Handles multi-turn conversations
 
-Extracts intelligence such as:
+* Extracts intelligence such as:
 
-UPI IDs
+* UPI IDs
 
-Phone numbers
+* Phone numbers
 
-Bank account numbers
+* Bank account numbers
 
-Phishing links
+* Phishing links
 
 Sends a mandatory final callback to GUVI once engagement completes
 
