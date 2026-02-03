@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from openai import OpenAI
 from pydantic import BaseModel
 
+# Declaring the keys
 API_KEY = os.getenv("API_KEY", "sk_test_123456789")
 GUVI_CALLBACK_URL = "https://hackathon.guvi.in/api/updateHoneyPotFinalResult"
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
