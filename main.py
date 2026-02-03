@@ -4,7 +4,7 @@ import re
 import requests
 import time
 from threading import Thread
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from fastapi import FastAPI, Header, HTTPException, Body
 from fastapi import Request
@@ -13,10 +13,11 @@ from fastapi.responses import JSONResponse
 from openai import OpenAI
 from pydantic import BaseModel
 
-API_KEY = "sk_test_123456789"
+API_KEY = os.getenv("API_KEY", "sk_test_123456789")
 GUVI_CALLBACK_URL = "https://hackathon.guvi.in/api/updateHoneyPotFinalResult"
-OPENAI_MODEL = "gpt-4o-mini"
-MAX_TURNS = 10  # safety cap
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+MAX_TURNS = int(os.getenv("MAX_TURNS", "10"))  # safety cap
+SESSION_TIMEOUT = int(os.getenv("SESSION_TIMEOUT", "3600"))  # 1 hour
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
@@ -40,6 +41,7 @@ Behavior rules:
 Never say you are an AI.
 Never say you are detecting scam.
 Always sound human and genuine.
+Use simple Indian English expressions like "Sir/Madam", "Please help me", "I am not understanding properly".
 """
 
 # ------------------ APP ---------------------------------------------------------------
@@ -70,7 +72,22 @@ session_intelligence = {}
 session_start_time = {}
 session_finalized = {}
 session_is_scam = {}
-session_last_intel_snapshot = {}
+# session_last_intel_snapshot = {}
+
+# Session cleanup function
+def cleanup_old_sessions():
+    current_time = time.time()
+    expired_sessions = [
+        sid for sid, start_time in session_start_time.items()
+        if current_time - start_time > SESSION_TIMEOUT
+    ]
+    for sid in expired_sessions:
+        session_memory.pop(sid, None)
+        session_intelligence.pop(sid, None)
+        session_start_time.pop(sid, None)
+        session_finalized.pop(sid, None)
+        session_is_scam.pop(sid, None)
+        print(f"🧹 Cleaned up expired session: {sid}")
 
 # ------------------ MODELS --------------------------------------------------------------------
 
@@ -80,16 +97,16 @@ class Message(BaseModel):
     timestamp: str
 
 class Metadata(BaseModel):
-    channel: Optional[str]
-    language: Optional[str]
-    locale: Optional[str]
+    channel: Optional[str] = None
+    language: Optional[str] = None
+    locale: Optional[str] = None
 
 
 class HoneypotRequest(BaseModel):
     sessionId: str
     message: Message
     conversationHistory: List[Message] = []
-    metadata: Optional[Metadata]
+    metadata: Optional[Metadata] = None
 
 
 class HoneypotResponse(BaseModel):
@@ -111,6 +128,23 @@ SCAM_KEYWORDS = [
     "account", "acount", "accnt",
     "upi", "upii", "upiid",
     "refund", "cashback", "payment",
+    "ifsc",
+
+    # Indian Banks
+    "sbi", "hdfc", "icici", "canara", "pnb", "bob", "axis", "kotak",
+
+    # Indian Payment Apps
+    "paytm", "phonepe", "gpay",
+
+    # Government/Authority
+    "modi", "modiji", "government", "goverment",
+    "income tax", "incometax", "gst",
+    "pmkisan", "ayushman", "mudra",
+    "subsidy", "scholarship",
+    "covid", "vaccination",
+    "digital india", "startup india",
+    "digitaindia", "startupindia",  # Common misspellings
+    "pm kisan",
 
     # Phishing actions
     "click", "clk",
@@ -134,7 +168,9 @@ FALLBACK_BAITS = [
     "Can you tell me exactly where I need to verify this?",
     "Is there a number or app where I should complete this?",
     "Do I need to pay something or just confirm details?",
-    "Can you please guide me step by step? I am not very technical."
+    "Can you please guide me step by step? I am not very technical.",
+    "Sir, I am not understanding properly. Please help me.",
+    "What exactly do I need to do? I am worried about my account."
 ]
 
 def normalize_text(text: str) -> str:
@@ -163,19 +199,30 @@ def detect_scam(text: str):
 
 # ---------------------- AGENT -----------------------------------------------------------------
 
-def generate_agent_reply(history):
-    messages = [{"role": "system", "content": PERSONA_PROMPT}]
-    for msg in history[-6:]:
+def generate_agent_reply(history, metadata=None):
+    persona = PERSONA_PROMPT
+
+    # Enhance based on metadata
+    if metadata:
+        if metadata.channel == "SMS":
+            persona += "\nKeep responses short as this is SMS."
+        if metadata.locale == "IN":
+            persona += "\nUse more Indian context and expressions."
+
+    messages = [{"role": "system", "content": persona}]
+    for msg in history[-6:]:  # Last 6 messages for context
         messages.append({"role": msg["role"], "content": msg["content"]})
+
     try:
         response = client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=messages,
             temperature=0.7,
-            timeout=5
+            timeout=10
         )
         return response.choices[0].message.content
-    except Exception:
+    except Exception as e:
+        print(f"OpenAI API error: {e}")
         # Fallback response (very important)
         return random.choice(FALLBACK_BAITS)
 
@@ -214,10 +261,46 @@ def extract_intelligence(text: str):
     return {
         "phoneNumbers": list(set(phone_numbers)),
         "bankAccounts": list(set(bank_accounts)),
-        "upiIds": list(set(re.findall(r'\b[a-z0-9.\-_]{2,}@[a-z]{2,}\b', text))),
+        "upiIds": list(set(re.findall(r'\b[a-zA-Z0-9._-]+@[a-zA-Z]{3,}\b', text))),
         "phishingLinks": re.findall(r'https?://[^\s<>"\)\]]+', text),
         "suspiciousKeywords": [k for k in SCAM_KEYWORDS if k in text_lower]
     }
+
+
+# ---------------------- SESSION MANAGEMENT ---------------------------------------------------
+
+def initialize_session(session_id, conversation_history):
+    """Initialize session with conversation history"""
+    session_memory[session_id] = []
+
+    # Process existing conversation history
+    for msg in conversation_history:
+        if msg.sender == "scammer":
+            session_memory[session_id].append({"role": "user", "content": msg.text})
+        else:  # sender == "user" (your previous replies)
+            session_memory[session_id].append({"role": "assistant", "content": msg.text})
+
+    # Initialize other session data
+    session_intelligence[session_id] = {
+        "upiIds": [], "bankAccounts": [], "phoneNumbers": [],
+        "phishingLinks": [], "suspiciousKeywords": []
+    }
+    session_start_time[session_id] = time.time()
+    session_finalized[session_id] = False
+    session_is_scam[session_id] = False
+
+
+def should_finalize(intelligence, total_messages, time_elapsed):
+    """Determine if conversation should be finalized"""
+    intel_types = sum(1 for key in ["upiIds", "phishingLinks", "phoneNumbers", "bankAccounts"]
+                      if intelligence[key])
+
+    # Finalize conditions
+    return (
+            intel_types >= 2 or  # Good intelligence gathered
+            total_messages >= MAX_TURNS or  # Hit conversation limit
+            time_elapsed > 600  # 10 minutes elapsed
+    )
 
 # ---------------------- CALLBACK -------------------------------------------------------------------
 
@@ -228,51 +311,44 @@ def send_to_guvi(session_id, scam_detected, total_messages, intelligence, confid
             "scamDetected": scam_detected,
             "totalMessagesExchanged": total_messages,
             "extractedIntelligence": intelligence,
-            "agentNotes": f"Scammer used urgency tactics and payment redirection. Detection confidence: {confidence}"
+            "agentNotes": "Scammer used urgency tactics and payment redirection"
         }
         print("🚀 FINAL CALLBACK PAYLOAD:", payload)
         try:
-            requests.post(GUVI_CALLBACK_URL, json=payload, timeout=3)
+            response = requests.post(GUVI_CALLBACK_URL, json=payload, timeout=10)
+            response.raise_for_status()
+            print(f"✅ Callback successful for session {session_id}")
         except Exception as e:
-            print("Callback failed:", e)
+            print(f"❌ Callback failed for session {session_id}: {e}")
 
     Thread(target=task, daemon=True).start()
 
 # ----------------- API ----------------------------------------------------------------------------------
-
 @app.post("/honeypot", response_model=HoneypotResponse)
 def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
+    # Clean up old sessions periodically
+    if random.random() < 0.01:  # 1% chance to trigger cleanup
+        cleanup_old_sessions()
+
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
     session_id = request.sessionId
 
+    # Initialize session if new
     if session_id not in session_memory:
-        session_memory[session_id] = [
-            {
-                "role": "assistant" if m.sender == "user" else "user",
-                "content": m.text
-            }
-            for m in request.conversationHistory
-        ]
-        session_intelligence[session_id] = {
-            "upiIds": [], "bankAccounts": [], "phoneNumbers": [],
-            "phishingLinks": [], "suspiciousKeywords": []
-        }
-        session_start_time[session_id] = time.time()
-        session_finalized[session_id] = False
-        session_is_scam[session_id] = False
-        session_last_intel_snapshot[session_id] = set()
+        initialize_session(session_id, request.conversationHistory)
 
-    # Add scammer message
+    # Add current scammer message
     session_memory[session_id].append({
-        "role" : "user",
+        "role": "user",
         "content": request.message.text
     })
 
-    # Cap memory to last 10 messages
+    # Cap memory to last MAX_TURNS messages
     session_memory[session_id] = session_memory[session_id][-MAX_TURNS:]
 
+    # Detect scam
     detected, confidence = detect_scam(request.message.text)
 
     # Once scam, always scam (session-level)
@@ -281,42 +357,32 @@ def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
 
     is_scam = session_is_scam[session_id]
 
-    # Agent reply
+    # Generate reply only if scam detected
     if is_scam:
-        agent_reply = generate_agent_reply(session_memory[session_id])
+        agent_reply = generate_agent_reply(session_memory[session_id], request.metadata)
         session_memory[session_id].append({
             "role": "assistant",
             "content": agent_reply
         })
         session_memory[session_id] = session_memory[session_id][-MAX_TURNS:]
     else:
-        agent_reply = "Okay, noted."
+        agent_reply = "Could you please clarify what this is about? I'm not sure what you're referring to."
 
     # Extract intelligence
     intel = extract_intelligence(request.message.text)
     for k in session_intelligence[session_id]:
         session_intelligence[session_id][k] = list(set(session_intelligence[session_id][k] + intel[k]))
 
-    # detect intel stability
-    snapshot = set()
-
-    for k in ["upiIds", "phishingLinks", "phoneNumbers", "bankAccounts"]:
-        for v in session_intelligence[session_id][k]:
-            snapshot.add(f"{k}:{v}")
-
-    new_intel = snapshot != session_last_intel_snapshot[session_id]
-    session_last_intel_snapshot[session_id] = snapshot
-
-    # Finalize if useful info found
+    # Finalize if useful info found or conditions met
     if is_scam and not session_finalized[session_id]:
-        score = sum(bool(session_intelligence[session_id][k]) for k in ["upiIds","phishingLinks","phoneNumbers","bankAccounts"])
-        total = len(session_memory[session_id])
+        total_messages = len(session_memory[session_id])
+        time_elapsed = time.time() - session_start_time[session_id]
 
-        if (score >= 2 and not new_intel) or total >= MAX_TURNS:
+        if should_finalize(session_intelligence[session_id], total_messages, time_elapsed):
             send_to_guvi(
                 session_id,
                 True,
-                total,
+                total_messages,
                 session_intelligence[session_id],
                 confidence
             )
@@ -331,7 +397,6 @@ def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
 # TEST ENDPOINT (NO BODY / {} ALLOWED)
 # =====================================================
 
-# API test point
 @app.post("/honeypot/guvi-test")
 async def honeypot_test(_: dict = Body(...), x_api_key: str = Header(None)):
     if x_api_key != API_KEY:
@@ -345,7 +410,15 @@ async def honeypot_test(_: dict = Body(...), x_api_key: str = Header(None)):
         "extractedIntelligence": {},
         "totalMessages": 0
     }
-
 @app.get("/")
 def health():
-    return {"message" : "Agentic Honeypot is running"}
+    return {"message": "Agentic Honeypot is running"}
+
+
+@app.get("/health")
+def health_check():
+    return {
+        "status": "healthy",
+        "active_sessions": len(session_memory),
+        "uptime": time.time()
+    }
