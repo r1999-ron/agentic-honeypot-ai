@@ -4,7 +4,7 @@ import re
 import requests
 import time
 from threading import Thread
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 
 from fastapi import FastAPI, Header, HTTPException, Body
 from fastapi import Request
@@ -95,7 +95,7 @@ def cleanup_old_sessions():
 class Message(BaseModel):
     sender: str
     text: str
-    timestamp: str
+    timestamp: Union[int, str]
 
 class Metadata(BaseModel):
     channel: Optional[str] = None
