@@ -118,13 +118,17 @@ class HoneypotResponse(BaseModel):
 
 SCAM_KEYWORDS = [
     # Authentication / urgency
-    "otp", "otpp",
+    "otp", "otpp", "PINs",
     "kyc", "kycupdate", "kycverify",
-    "verify", "verfy", "verifiy",
-    "urgent", "immediate", "immidiate", "asap", "arrest", "warrant",
-    "blocked", "blockd", "locked", "suspend", "suspnd",
+    "verify", "verfy", "verifiy", "varification",
+    "urgent", "immediate", "immidiate", "imidiate", "asap",
+    "arrest", "warrant", "FIR", "warning",
+    "blocked", "blockd", "locked", "suspend", "suspnd", "lock account",
 
-    # Video call scams (NEW)
+    # Threat terms
+    "legal action", "court case", "police complaint",
+
+    # Video call scams
     "video call", "videocall", "video verification",
     "video verify", "video kyc", "join call",
     "whatsapp video", "show documents",
@@ -136,6 +140,14 @@ SCAM_KEYWORDS = [
     "refund", "cashback", "payment",
     "ifsc",
 
+    # Financial products / scams
+    "Credit Card", "Loan",
+    "personal loan", "instant loan", "gold loan",
+    "investment opportunity",
+
+    # Technical scams
+    "APK file",
+
     # Indian Banks
     "sbi", "hdfc", "icici", "canara", "pnb", "bob", "axis", "kotak",
 
@@ -143,14 +155,13 @@ SCAM_KEYWORDS = [
     "paytm", "phonepe", "gpay",
 
     # Government/Authority
-    "modi", "modiji", "government", "goverment",
+    "modi", "modiji", "government", "goverment", "govermnent",
     "income tax", "incometax", "gst",
-    "pmkisan", "ayushman", "mudra",
+    "pmkisan", "pm kisan", "ayushman", "mudra",
     "subsidy", "scholarship",
     "covid", "vaccination",
     "digital india", "startup india",
-    "digitaindia", "startupindia",  # Common misspellings
-    "pm kisan",
+    "digitaindia", "startupindia",  # misspellings
 
     # Phishing actions
     "click", "clk",
@@ -159,7 +170,8 @@ SCAM_KEYWORDS = [
 
     # Identity / reward traps
     "pan", "aadhar", "aadhaar",
-    "prize", "lottery", "winner"
+    "prize", "lottery", "winner",
+    "package delivery"
 ]
 
 URGENT_PATTERNS = [
