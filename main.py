@@ -21,7 +21,12 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 MAX_TURNS = int(os.getenv("MAX_TURNS", "10"))  # safety cap
 SESSION_TIMEOUT = int(os.getenv("SESSION_TIMEOUT", "3600"))  # 1 hour
 
+print("PORT ENV:", os.getenv("PORT"))
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+print("OPENAI_API_KEY exists:", bool(os.getenv("OPENAI_API_KEY")))
+
 if not OPENAI_API_KEY:
     raise RuntimeError("OPENAI_API_KEY environment variable not set")
 
