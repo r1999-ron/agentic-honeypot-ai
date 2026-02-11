@@ -12,6 +12,7 @@ from fastapi.exceptions import HTTPException as FastAPIHTTPException
 from fastapi.responses import JSONResponse
 from openai import OpenAI
 from pydantic import BaseModel
+from starlette.middleware.cors import CORSMiddleware
 
 # Declaring the keys
 API_KEY = os.getenv("API_KEY", "sk_test_123456789")
@@ -48,6 +49,14 @@ Use simple Indian English expressions like "Sir/Madam", "Please help me", "I am 
 # ------------------ APP ---------------------------------------------------------------
 
 app = FastAPI(title="Agentic Honeypot API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # ----------- ERROR HANDLING PROCESS-----------------------------------------------------------

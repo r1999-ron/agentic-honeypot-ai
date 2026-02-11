@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Agentic Honeypot - Mobile Demo</title>
+
+<style>
+body {
+  margin: 0;
+  background: #000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* PHONE FRAME */
+.phone {
+  width: 390px;
+  height: 780px;
+  background: #f2f2f7;
+  border-radius: 40px;
+  overflow: hidden;
+  box-shadow: 0 0 40px rgba(0,0,0,0.6);
+  display: flex;
+  flex-direction: column;
+}
+
+/* HEADER */
+.header {
+  padding: 15px;
+  background: #ffffff;
+  border-bottom: 1px solid #ddd;
+  text-align: center;
+  font-weight: 600;
+}
+
+.status {
+  font-size: 12px;
+  color: #888;
+}
+
+/* CHAT AREA */
+.chat {
+  flex: 1;
+  padding: 15px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* MESSAGE BUBBLES */
+.message {
+  max-width: 75%;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  border-radius: 20px;
+  font-size: 15px;
+  line-height: 1.4;
+  animation: fadeIn 0.3s ease;
+}
+
+/* Scammer (grey bubble) */
+.scammer {
+  background: #e5e5ea;
+  color: black;
+  align-self: flex-start;
+  border-bottom-left-radius: 5px;
+}
+
+/* AI Victim (blue bubble) */
+.victim {
+  background: #007aff;
+  color: white;
+  align-self: flex-end;
+  border-bottom-right-radius: 5px;
+}
+
+/* FOOTER */
+.footer {
+  padding: 12px;
+  background: #ffffff;
+  border-top: 1px solid #ddd;
+  text-align: center;
+}
+
+button {
+  padding: 10px 20px;
+  border: none;
+  background: #007aff;
+  color: white;
+  border-radius: 20px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #005ecb;
+}
+
+.status {
+  font-size: 12px;
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #34c759;  /* Apple-style green */
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  background: #34c759;
+  border-radius: 50%;
+  box-shadow: 0 0 6px #34c759;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+</style>
+</head>
+
+<body>
+
+<div class="phone">
+
+  <div class="header">
+  ⚠ Account Security Desk
+  <div class="status">
+    <span class="dot"></span> Online
+  </div>
+</div>
+
+  <div class="chat" id="chat"></div>
+
+  <div class="footer">
+    <button onclick="startDemo()">Start Live Scam Demo</button>
+  </div>
+
+</div>
+
+<audio id="notifSound">
+  <source src="https://actions.google.com/sounds/v1/cartoon/wood_plank_flicks.ogg" type="audio/ogg">
+</audio>
+
+
+<script>
+
+const scamScript = [
+"Hello sir your SBI account will be blocked immediately.",
+"Please verify KYC urgently.",
+"To avoid suspension pay ₹199 to securehelp@okaxis",
+"Click https://fakebankverify.com now."
+];
+
+let sessionId = "";
+let index = 0;
+
+async function startDemo() {
+
+  index = 0;
+  sessionId = "demo-" + Date.now();
+
+  document.getElementById("chat").innerHTML = "";
+
+  runConversation();
+}
+
+async function runConversation() {
+
+  if(index >= scamScript.length) return;
+
+  const scamText = scamScript[index];
+
+  // 🔔 Scammer message
+  addMessage(scamText, "scammer");
+
+  const response = await fetch("https://agentic-honeypot-ai-production.up.railway.app/honeypot", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": "sk_test_123456789"
+    },
+    body: JSON.stringify({
+      sessionId: sessionId,
+      message: {
+        sender: "scammer",
+        text: scamText,
+        timestamp: Date.now()
+      },
+      conversationHistory: [],
+      metadata: { channel:"SMS", locale:"IN" }
+    })
+  });
+
+  const data = await response.json();
+
+  // 🔔 Victim reply
+  addMessage(data.reply, "victim");
+
+  index++;
+  setTimeout(runConversation, 2500);
+}
+
+function addMessage(text, cls){
+
+  const msg = document.createElement("div");
+  msg.className = "message " + cls;
+  msg.innerText = text;
+
+  document.getElementById("chat").appendChild(msg);
+  document.getElementById("chat").scrollTop =
+    document.getElementById("chat").scrollHeight;
+
+  // 🔔 Play notification sound
+  const sound = document.getElementById("notifSound");
+  if(sound){
+    sound.currentTime = 0;
+    sound.play().catch(() => {});
+  }
+}
+</script>
+
+</body>
+</html>
