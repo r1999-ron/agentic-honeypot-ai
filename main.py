@@ -211,20 +211,54 @@ def normalize_text(text: str) -> str:
     text = re.sub(r'\s+', ' ', text).strip() # normalize spaces
     return text
 
+SOFT_SIGNALS = [
+    "verification process",
+    "small verification",
+    "calling from",
+    "reaching out from",
+    "regarding your account",
+    "customer support",
+    "compliance update",
+    "account verification",
+    "security check"
+]
+
+BANK_ENTITIES = [
+    "state bank",
+    "sbi",
+    "hdfc",
+    "icici",
+    "axis",
+    "kotak",
+    "pnb",
+    "canara"
+]
+
 def detect_scam(text: str):
     text_norm = normalize_text(text)
 
-    # Keyword-based detection
-    matches = sum(1 for word in SCAM_KEYWORDS if word in text_norm)
+    # -------- HARD SIGNALS --------
+    hard_matches = sum(1 for word in SCAM_KEYWORDS if word in text_norm)
 
-    # Urgency pattern detection
     if any(re.search(p, text_norm) for p in URGENT_PATTERNS):
-        confidence = min(0.75 + matches * 0.05, 0.95)
+        confidence = min(0.80 + hard_matches * 0.05, 0.95)
         return True, confidence
 
-    if matches >= 2:
-        confidence = min(0.7 + matches * 0.05, 0.95)
+    if hard_matches >= 2:
+        confidence = min(0.75 + hard_matches * 0.05, 0.95)
         return True, confidence
+
+    # -------- SOFT SIGNALS --------
+    soft_matches = sum(1 for s in SOFT_SIGNALS if s in text_norm)
+    bank_match = any(bank in text_norm for bank in BANK_ENTITIES)
+
+    if soft_matches >= 1 and bank_match:
+        # Engage but lower confidence
+        return True, 0.65
+
+    # Suspicious but not confirmed
+    if soft_matches >= 1:
+        return True, 0.55
 
     return False, 0.3
 
@@ -390,7 +424,19 @@ def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
     is_scam = session_is_scam[session_id]
 
     # Generate reply only if scam detected
-    if is_scam:
+
+    # Engage if:
+    # - Hard scam detected
+    # - OR soft suspicious signals present
+
+    text_norm = normalize_text(request.message.text)
+
+    soft_signal_present = any(s in text_norm for s in SOFT_SIGNALS)
+    bank_present = any(b in text_norm for b in BANK_ENTITIES)
+
+    soft_suspicion = soft_signal_present and bank_present
+
+    if is_scam or soft_suspicion:
         agent_reply = generate_agent_reply(session_memory[session_id], request.metadata)
         session_memory[session_id].append({
             "role": "assistant",
