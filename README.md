@@ -605,7 +605,7 @@ This is a hackathon submission. For questions or collaboration:
 
 - **GitHub**: [https://github.com/r1999-ron]
 - **Email**: [ronaksengupta@gmail.com]
-- **LinkedIn**: [[your-linkedin-profile](https://www.linkedin.com/in/ronak-s-803b98194/)]
+- **LinkedIn**: [https://www.linkedin.com/in/ronak-s-803b98194/]
 
 ---
 
