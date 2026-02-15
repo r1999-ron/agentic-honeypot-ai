@@ -468,6 +468,7 @@ def build_final_output(session_id):
     messages = len(session_memory[session_id])
 
     return {
+        "status": "completed",
         "sessionId": session_id,
         "scamDetected": session_is_scam[session_id],
         "totalMessagesExchanged": messages,
@@ -528,13 +529,14 @@ def should_finalize(session_id):
 
     msgs = len(session_memory[session_id])
     intel = session_intelligence[session_id]
-
     intel_types = sum(1 for v in intel.values() if v)
+    duration = time.time() - session_start_time[session_id]
 
     return (
-        (msgs >= 6 and intel_types >= 1) or
-        msgs >= MAX_TURNS or
-        time.time() - session_start_time[session_id] > 600
+        (msgs >= 6 and intel_types >= 1) or  # Ideal completion
+        msgs >= MAX_TURNS or                 # Conversation limit
+        duration > 600 or                    # Timeout
+        (intel_types >= 2 and msgs >= 4)     # High-value intel early
     )
 
 # ==================== API ENDPOINT ====================
@@ -606,7 +608,7 @@ def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
 
     # ================= FINALIZATION =================
 
-    if is_scam and not session_finalized.get(session_id, False):
+    if not session_finalized.get(session_id, False):
 
         if should_finalize(session_id):
             final_output = build_final_output(session_id)
