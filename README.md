@@ -603,9 +603,9 @@ SESSION_TIMEOUT=3600
 
 This is a hackathon submission. For questions or collaboration:
 
-- **GitHub**: [your-github-username]
-- **Email**: [your-email@example.com]
-- **LinkedIn**: [your-linkedin-profile]
+- **GitHub**: [https://github.com/r1999-ron]
+- **Email**: [ronaksengupta@gmail.com]
+- **LinkedIn**: [[your-linkedin-profile](https://www.linkedin.com/in/ronak-s-803b98194/)]
 
 ---
 
@@ -626,7 +626,7 @@ MIT License - See LICENSE file for details
 ## 📞 Support
 
 For issues or questions:
-1. Check the [Issues](https://github.com/yourusername/honeypot-api/issues) page
+1. Check the [Issues](https://github.com/r1999-ron/agentic-honeypot-ai/issues) page
 2. Review the [API Documentation](#api-documentation)
 3. Contact via email: ronaksengupta@gmail.com
 
