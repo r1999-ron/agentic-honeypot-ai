@@ -2,6 +2,7 @@ import os
 import random
 import re
 import time
+from threading import Thread
 from typing import List, Optional, Union
 
 from fastapi import FastAPI, Header, HTTPException, Body
@@ -95,7 +96,8 @@ session_memory = {}
 session_intelligence = {}
 session_start_time = {}
 session_is_scam = {}
-
+session_final_output = {}
+session_finalized = {}
 
 # ==================== SESSION CLEANUP ====================
 
@@ -135,27 +137,9 @@ class HoneypotRequest(BaseModel):
     metadata: Optional[Metadata] = None
 
 
-class EngagementMetrics(BaseModel):
-    totalMessagesExchanged: int
-    engagementDurationSeconds: int
-
-
-class ExtractedIntelligence(BaseModel):
-    phoneNumbers: List[str] = []
-    bankAccounts: List[str] = []
-    upiIds: List[str] = []
-    phishingLinks: List[str] = []
-    emailAddresses: List[str] = []
-    suspiciousKeywords: List[str] = []
-
-
 class HoneypotResponse(BaseModel):
     status: str
     reply: str
-    scamDetected: bool
-    extractedIntelligence: ExtractedIntelligence
-    engagementMetrics: EngagementMetrics
-    agentNotes: str
 
 
 # ==================== SCAM DETECTION DATA ====================
@@ -333,76 +317,80 @@ def detect_scam(text: str):
 # ==================== INTELLIGENCE EXTRACTION ====================
 
 def extract_intelligence(text: str):
-    """Extract scam intelligence with validation"""
+    """Extract scam intelligence with validation (production-ready)"""
+
     text_lower = text.lower()
 
     phone_numbers = []
     bank_accounts = []
 
-    # 1️⃣ Extract +91 phone numbers FIRST
-    plus_phones = re.findall(r'\+91\d{10}', text)
-    phone_numbers.extend(plus_phones)
+    # ---------------- PHONE NUMBERS ----------------
 
-    # Remove extracted +91 numbers from text
     cleaned_text = text
+
+    # 1️⃣ +91 format (with optional dash/space)
+    plus_phones = re.findall(r'\+91[-\s]?\d{10}', text)
+    phone_numbers.extend([p.replace(" ", "").replace("-", "") for p in plus_phones])
+
     for p in plus_phones:
         cleaned_text = cleaned_text.replace(p, "")
 
-    # 2️⃣ Extract 12-digit numbers starting with 91 (phone without +)
+    # 2️⃣ 91 prefix without +
     cc_phones = re.findall(r'\b91\d{10}\b', cleaned_text)
-    phone_numbers.extend(cc_phones)
+    phone_numbers.extend(["+91" + p[2:] for p in cc_phones])
 
-    # Remove extracted 91-prefix numbers
     cleaned_text = re.sub(r'\b91\d{10}\b', '', cleaned_text)
 
-    # 3️⃣ Extract 10-digit phone numbers
-    ten_digit_phones = re.findall(r'\b\d{10}\b', cleaned_text)
-    phone_numbers.extend(ten_digit_phones)
+    # 3️⃣ Plain 10-digit Indian numbers (starting 6–9)
+    ten_digit_phones = re.findall(r'\b[6-9]\d{9}\b', cleaned_text)
+    phone_numbers.extend(["+91" + num for num in ten_digit_phones])
 
-    # Remove extracted 10-digit numbers
-    cleaned_text = re.sub(r'\b\d{10}\b', '', cleaned_text)
+    cleaned_text = re.sub(r'\b[6-9]\d{9}\b', '', cleaned_text)
 
-    # 4️⃣ Extract bank accounts (12-18 digits, context-aware)
-    # Only extract if "bank" or "account" mentioned to avoid false positives
+    # ---------------- BANK ACCOUNTS ----------------
+
     if any(k in text_lower for k in ["bank", "account", "acc", "a/c"]):
         bank_accounts = re.findall(r'\b\d{12,18}\b', cleaned_text)
 
-    # 5️⃣ Extract emails FIRST (to separate from UPI)
-    email_addresses = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    # ---------------- EMAILS ----------------
+
+    email_addresses = re.findall(
+        r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b',
+        text
+    )
     email_set = set(email_addresses)
 
-    # 6️⃣ Extract UPIs (excluding emails and email fragments)
+    # ---------------- UPI IDs ----------------
+
     potential_upis = re.findall(r'\b[a-zA-Z0-9._-]+@[a-zA-Z]{3,}\b', text)
     upi_ids = []
 
     for upi in potential_upis:
-        # Skip if it's an email
+
+        # Skip emails
         if upi in email_set:
             continue
 
-        # Skip if it's a fragment of an email
-        # Example: "offers@fake" is part of "offers@fake-amazon-deals.com"
-        is_email_fragment = False
-        for email in email_addresses:
-            if email.startswith(upi + '-') or email.startswith(upi + '.'):
-                is_email_fragment = True
-                break
-
-        if is_email_fragment:
+        # Skip email fragments
+        if any(email.startswith(upi + '-') or email.startswith(upi + '.') for email in email_addresses):
             continue
 
-        # Validate UPI: domain shouldn't have dots or hyphens
         domain = upi.split('@')[1] if '@' in upi else ''
+
+        # Valid UPI domains have no dots or hyphens
         if domain and '.' not in domain and '-' not in domain and len(domain) >= 3:
             upi_ids.append(upi)
 
-    # 7️⃣ Extract and clean phishing links
+    # ---------------- PHISHING LINKS ----------------
+
     phishing_links = re.findall(r'https?://[^\s<>"\)\]]+', text)
-    # Remove trailing punctuation (periods, commas, etc.)
     phishing_links = [link.rstrip('.,!?;:') for link in phishing_links]
 
-    # 8️⃣ Extract suspicious keywords
+    # ---------------- SUSPICIOUS KEYWORDS ----------------
+
     suspicious_keywords = [k for k in SCAM_KEYWORDS if k in text_lower]
+
+    # ---------------- RETURN ----------------
 
     return {
         "phoneNumbers": list(set(phone_numbers)),
@@ -412,7 +400,6 @@ def extract_intelligence(text: str):
         "emailAddresses": list(set(email_addresses)),
         "suspiciousKeywords": suspicious_keywords
     }
-
 
 # ==================== AGENT ====================
 
@@ -466,45 +453,125 @@ def initialize_session(session_id, conversation_history):
     session_is_scam[session_id] = False
 
 
+# ================= FINAL OUTPUT =================
+
+def build_final_output(session_id):
+
+    intel = session_intelligence[session_id]
+
+    notes = generate_agent_notes_llm(
+        session_memory[session_id],
+        intel
+    )
+
+    duration = int(time.time() - session_start_time[session_id])
+    messages = len(session_memory[session_id])
+
+    return {
+        "sessionId": session_id,
+        "scamDetected": session_is_scam[session_id],
+        "totalMessagesExchanged": messages,
+        "extractedIntelligence": intel,
+        "engagementMetrics": {
+            "totalMessagesExchanged": messages,
+            "engagementDurationSeconds": duration
+        },
+        "agentNotes": notes
+    }
+
+def generate_agent_notes_llm(history, intelligence):
+    try:
+        convo_text = "\n".join(
+            f"{m['role']}: {m['content']}" for m in history[-10:]
+        )
+
+        intel_summary = str(intelligence)
+
+        prompt = f"""
+You are a cybersecurity analyst.
+
+Analyze the conversation below and explain WHY this interaction is a scam.
+
+Conversation:
+{convo_text}
+
+Extracted intelligence:
+{intel_summary}
+
+Write 2–3 concise sentences explaining why this is a scam.
+Do not use bullet points.
+Be concise, factual, and professional.
+Do NOT mention AI or analysis process.
+"""
+
+        response = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[{"role": "system", "content": prompt}],
+            temperature=0.2,
+            max_tokens=120,
+            timeout=10
+        )
+
+        note = response.choices[0].message.content.strip()
+
+        if not note:
+            raise ValueError("Empty note")
+
+        return note
+
+    except Exception:
+        return "Suspicious behavior consistent with scam tactics"
+
+# ================= FINALIZATION RULE =================
+
+def should_finalize(session_id):
+
+    msgs = len(session_memory[session_id])
+    intel = session_intelligence[session_id]
+
+    intel_types = sum(1 for v in intel.values() if v)
+
+    return (
+        (msgs >= 6 and intel_types >= 1) or
+        msgs >= MAX_TURNS or
+        time.time() - session_start_time[session_id] > 600
+    )
+
 # ==================== API ENDPOINT ====================
 
 @app.post("/honeypot", response_model=HoneypotResponse)
 def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
-    """Main honeypot endpoint"""
 
-    # Periodic cleanup
     if random.random() < 0.01:
         cleanup_old_sessions()
 
-    # Auth check
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
     session_id = request.sessionId
 
-    # Initialize session if new
+    # Initialize session
     if session_id not in session_memory:
         initialize_session(session_id, request.conversationHistory)
+        session_finalized[session_id] = False   # 🔥 IMPORTANT
 
-    # Add current scammer message
+    # Add scammer message
     session_memory[session_id].append({
         "role": "user",
         "content": request.message.text
     })
 
-    # Cap memory
     session_memory[session_id] = session_memory[session_id][-MAX_TURNS:]
 
     # Detect scam
     detected, confidence = detect_scam(request.message.text)
 
-    # Update session-level scam flag
     if detected:
         session_is_scam[session_id] = True
 
     is_scam = session_is_scam.get(session_id, False)
 
-    # Check soft signals for engagement
+    # Soft suspicion check
     text_norm = normalize_text(request.message.text)
     soft_signal_present = any(s in text_norm for s in SOFT_SIGNALS)
     bank_present = any(b in text_norm for b in BANK_ENTITIES)
@@ -512,67 +579,47 @@ def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
 
     # Generate reply
     if is_scam or soft_suspicion:
-        agent_reply = generate_agent_reply(session_memory[session_id], request.metadata)
-        session_memory[session_id].append({
-            "role": "assistant",
-            "content": agent_reply
-        })
-        session_memory[session_id] = session_memory[session_id][-MAX_TURNS:]
+        agent_reply = generate_agent_reply(
+            session_memory[session_id],
+            request.metadata
+        )
     else:
-        # Still engage politely to maintain conversation
-        agent_reply = generate_agent_reply(session_memory[session_id], request.metadata)
-        session_memory[session_id].append({
-            "role": "assistant",
-            "content": agent_reply
-        })
+        agent_reply = generate_agent_reply(
+            session_memory[session_id],
+            request.metadata
+        )
 
-    # Extract intelligence from current message
+    session_memory[session_id].append({
+        "role": "assistant",
+        "content": agent_reply
+    })
+
+    session_memory[session_id] = session_memory[session_id][-MAX_TURNS:]
+
+    # 🔎 Extract intelligence
     intel = extract_intelligence(request.message.text)
+
     for k in session_intelligence[session_id]:
         session_intelligence[session_id][k] = list(
             set(session_intelligence[session_id][k] + intel[k])
         )
 
-    # Calculate engagement metrics
-    total_messages = len(session_memory[session_id])
-    duration_seconds = int(time.time() - session_start_time[session_id])
+    # ================= FINALIZATION =================
 
-    # Build agent notes
-    intel_count = sum(1 for v in session_intelligence[session_id].values() if v)
-    agent_notes = f"Confidence: {confidence:.2f}. Turn {total_messages}. Extracted {intel_count} intelligence types. "
+    if is_scam and not session_finalized.get(session_id, False):
 
-    if is_scam:
-        tactics = []
-        if any(k in text_norm for k in ["urgent", "immediate", "asap"]):
-            tactics.append("urgency")
-        if any(k in text_norm for k in ["verify", "confirm", "update"]):
-            tactics.append("verification requests")
-        if any(k in text_norm for k in ["payment", "upi", "account"]):
-            tactics.append("payment redirection")
-        if session_intelligence[session_id]["phishingLinks"]:
-            tactics.append("phishing links")
+        if should_finalize(session_id):
+            final_output = build_final_output(session_id)
 
-        if tactics:
-            agent_notes += f"Scammer tactics: {', '.join(tactics)}."
+            session_final_output[session_id] = final_output
 
-    # Return complete response with all required fields
+            print("FINAL OUTPUT:", final_output)
+
+            session_finalized[session_id] = True
+    # REQUIRED RESPONSE FORMAT (VERY IMPORTANT)
     return {
         "status": "success",
-        "reply": agent_reply,
-        "scamDetected": is_scam,
-        "extractedIntelligence": {
-            "phoneNumbers": session_intelligence[session_id]["phoneNumbers"],
-            "bankAccounts": session_intelligence[session_id]["bankAccounts"],
-            "upiIds": session_intelligence[session_id]["upiIds"],
-            "phishingLinks": session_intelligence[session_id]["phishingLinks"],
-            "emailAddresses": session_intelligence[session_id]["emailAddresses"],
-            "suspiciousKeywords": session_intelligence[session_id]["suspiciousKeywords"]
-        },
-        "engagementMetrics": {
-            "totalMessagesExchanged": total_messages,
-            "engagementDurationSeconds": duration_seconds
-        },
-        "agentNotes": agent_notes
+        "reply": agent_reply
     }
 
 
@@ -602,6 +649,10 @@ async def honeypot_test(_: dict = Body(...), x_api_key: str = Header(None)):
         },
         "agentNotes": "Test endpoint response"
     }
+
+@app.get("/honeypot/final/{session_id}")
+def get_final_output(session_id: str):
+    return session_final_output.get(session_id, {})
 
 
 @app.get("/")
