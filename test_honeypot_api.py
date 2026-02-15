@@ -1,344 +1,489 @@
-#!/usr/bin/env python3
-"""
-End-to-End Testing Script for Honeypot API
-This script simulates the complete evaluation flow
-"""
-
 import requests
-import json
-import time
 import uuid
-from typing import List, Dict
+import json
+from datetime import datetime
+import time
 
-# Configuration
-API_BASE_URL = "http://localhost:8000"  # Change to your deployed URL
+# Your API configuration
+ENDPOINT_URL = "http://localhost:8000/honeypot"  # Change to your deployed URL
 API_KEY = "sk_test_123456789"  # Your API key
-HEADERS = {
-    "Content-Type": "application/json",
-    "x-api-key": API_KEY
+
+# Official GUVI Test Scenarios
+GUVI_SCENARIOS = [
+    {
+        "scenarioId": "bank_fraud",
+        "name": "Bank Fraud Detection",
+        "description": "Bank account fraud with urgency tactics",
+        "scamType": "bank_fraud",
+        "initialMessage": "URGENT: Your SBI account has been compromised. Your account will be blocked in 2 hours. Share your account number and OTP immediately to verify your identity.",
+        "metadata": {
+            "channel": "SMS",
+            "language": "English",
+            "locale": "IN"
+        },
+        "weight": 10,
+        "maxTurns": 10,
+        "fakeData": {
+            "bankAccount": "1234567890123456",
+            "upiId": "scammer.fraud@fakebank",
+            "phoneNumber": "+91-9876543210"
+        }
+    },
+    {
+        "scenarioId": "upi_fraud",
+        "name": "UPI Fraud Multi-turn",
+        "description": "UPI fraud with cashback scam",
+        "scamType": "upi_fraud",
+        "initialMessage": "Congratulations! You have won a cashback of Rs. 5000 from Paytm. To claim your reward, please verify your UPI details. This is from official customer support.",
+        "metadata": {
+            "channel": "WhatsApp",
+            "language": "English",
+            "locale": "IN"
+        },
+        "weight": 10,
+        "maxTurns": 10,
+        "fakeData": {
+            "upiId": "cashback.scam@fakeupi",
+            "phoneNumber": "+91-8765432109"
+        }
+    },
+    {
+        "scenarioId": "phishing_link",
+        "name": "Phishing Link Detection",
+        "description": "Phishing link with fake offer",
+        "scamType": "phishing",
+        "initialMessage": "You have been selected for iPhone 15 Pro at just Rs. 999! Click here to claim: http://amaz0n-deals.fake-site.com/claim?id=12345. Offer expires in 10 minutes!",
+        "metadata": {
+            "channel": "Email",
+            "language": "English",
+            "locale": "IN"
+        },
+        "weight": 10,
+        "maxTurns": 10,
+        "fakeData": {
+            "phishingLink": "http://amaz0n-deals.fake-site.com/claim?id=12345",
+            "emailAddress": "offers@fake-amazon-deals.com"
+        }
+    }
+]
+
+# Simulated follow-up messages for each scenario
+FOLLOW_UP_MESSAGES = {
+    "bank_fraud": [
+        "Sir, please provide your account number immediately. We need to verify your identity.",
+        "Time is running out! Your account will be permanently blocked. Call our helpline at +91-9876543210 now.",
+        "We need your card details and CVV to unblock your account. This is urgent verification process.",
+        "Send your OTP that you received to scammer.fraud@fakebank to complete verification.",
+        "Last chance! Provide your bank account 1234567890123456 details or face legal action."
+    ],
+    "upi_fraud": [
+        "Please share your UPI ID to receive the cashback of Rs. 5000.",
+        "For verification, please send Rs. 1 to cashback.scam@fakeupi. This amount will be refunded.",
+        "Call our helpline at +91-8765432109 for immediate assistance with your cashback.",
+        "Your cashback is pending. Please confirm your UPI ID: cashback.scam@fakeupi",
+        "Final reminder! Complete UPI verification within 5 minutes or offer expires."
+    ],
+    "phishing_link": [
+        "Click the link to claim your iPhone: http://amaz0n-deals.fake-site.com/claim?id=12345",
+        "For customer support, email us at offers@fake-amazon-deals.com",
+        "Only 2 minutes left! Complete your order now at http://amaz0n-deals.fake-site.com/claim?id=12345",
+        "Contact offers@fake-amazon-deals.com if you face any issues with the link.",
+        "Last chance! This is your final reminder to claim iPhone 15 Pro."
+    ]
 }
 
 
-class HoneypotTester:
-    def __init__(self, base_url: str, api_key: str):
-        self.base_url = base_url
-        self.headers = {
-            "Content-Type": "application/json",
-            "x-api-key": api_key
+def test_single_scenario(scenario, auto_mode=True):
+    """Test a single GUVI scenario"""
+
+    print("\n" + "=" * 80)
+    print(f"🎯 TESTING SCENARIO: {scenario['name']}")
+    print(f"📝 Description: {scenario['description']}")
+    print(f"🎲 Scenario ID: {scenario['scenarioId']}")
+    print("=" * 80)
+
+    # Generate unique session ID
+    session_id = str(uuid.uuid4())
+    conversation_history = []
+
+    # Setup headers
+    headers = {
+        'Content-Type': 'application/json',
+        'x-api-key': API_KEY
+    }
+
+    print(f"\n🔑 Session ID: {session_id}")
+    print(f"📊 Max Turns: {scenario['maxTurns']}")
+    print(f"🎯 Fake Data to Extract:")
+    for key, value in scenario['fakeData'].items():
+        print(f"   - {key}: {value}")
+
+    start_time = time.time()
+    all_responses = []
+
+    # Simulate conversation turns
+    for turn in range(1, scenario['maxTurns'] + 1):
+        print(f"\n{'─' * 80}")
+        print(f"📍 Turn {turn}/{scenario['maxTurns']}")
+        print(f"{'─' * 80}")
+
+        # Determine scammer message
+        if turn == 1:
+            scammer_message = scenario['initialMessage']
+        else:
+            if auto_mode:
+                # Use pre-defined follow-up messages
+                follow_ups = FOLLOW_UP_MESSAGES.get(scenario['scenarioId'], [])
+                if turn - 2 < len(follow_ups):
+                    scammer_message = follow_ups[turn - 2]
+                else:
+                    print("✅ All follow-up messages exhausted. Ending conversation.")
+                    break
+            else:
+                # Manual input mode
+                scammer_message = input("Enter next scammer message (or 'quit' to stop): ")
+                if scammer_message.lower() == 'quit':
+                    break
+
+        # Prepare message object
+        message = {
+            "sender": "scammer",
+            "text": scammer_message,
+            "timestamp": str(int(datetime.utcnow().timestamp() * 1000))
         }
-        self.session_id = f"test-{uuid.uuid4()}"
-        self.conversation_history = []
 
-    def send_message(self, scammer_message: str, metadata: dict = None) -> dict:
-        """Send a message to the honeypot API"""
-
-        payload = {
-            "sessionId": self.session_id,
-            "message": {
-                "sender": "scammer",
-                "text": scammer_message,
-                "timestamp": str(int(time.time() * 1000))
-            },
-            "conversationHistory": self.conversation_history.copy(),
-            "metadata": metadata or {
-                "channel": "SMS",
-                "language": "English",
-                "locale": "IN"
-            }
+        # Prepare request
+        request_body = {
+            'sessionId': session_id,
+            'message': message,
+            'conversationHistory': conversation_history,
+            'metadata': scenario['metadata']
         }
 
-        print(f"\n📤 SENDING: {scammer_message}")
-        print(f"📋 Conversation History Length: {len(self.conversation_history)}")
+        print(f"🔴 Scammer: {scammer_message}")
 
         try:
+            # Call your API
             response = requests.post(
-                f"{self.base_url}/honeypot",
-                headers=self.headers,
-                json=payload,
+                ENDPOINT_URL,
+                headers=headers,
+                json=request_body,
                 timeout=30
             )
 
-            print(f"🌐 Response Status: {response.status_code}")
+            # Check response
+            if response.status_code != 200:
+                print(f"❌ ERROR: API returned status {response.status_code}")
+                print(f"Response: {response.text}")
+                break
 
-            if response.status_code == 200:
-                result = response.json()
-                agent_reply = result.get("reply", "No reply")
+            response_data = response.json()
+            all_responses.append(response_data)
 
-                print(f"📥 AGENT REPLY: {agent_reply}")
+            # Extract honeypot reply
+            honeypot_reply = response_data.get('reply', 'NO REPLY')
+            print(f"🟢 Honeypot: {honeypot_reply}")
 
-                # Update conversation history
-                self.conversation_history.append({
-                    "sender": "scammer",
-                    "text": scammer_message,
-                    "timestamp": str(int(time.time() * 1000))
-                })
+            # Show extracted intelligence
+            if 'extractedIntelligence' in response_data:
+                intel = response_data['extractedIntelligence']
+                extracted_count = sum(1 for v in intel.values() if v)
+                if extracted_count > 0:
+                    print(f"\n📊 Extracted Intelligence (Turn {turn}):")
+                    if intel.get('phoneNumbers'):
+                        print(f"   📞 Phone Numbers: {intel['phoneNumbers']}")
+                    if intel.get('upiIds'):
+                        print(f"   💳 UPI IDs: {intel['upiIds']}")
+                    if intel.get('bankAccounts'):
+                        print(f"   🏦 Bank Accounts: {intel['bankAccounts']}")
+                    if intel.get('phishingLinks'):
+                        print(f"   🔗 Phishing Links: {intel['phishingLinks']}")
+                    if intel.get('emailAddresses'):
+                        print(f"   📧 Email Addresses: {intel['emailAddresses']}")
 
-                self.conversation_history.append({
-                    "sender": "user",
-                    "text": agent_reply,
-                    "timestamp": str(int(time.time() * 1000))
-                })
+            # Show scam detection status
+            if 'scamDetected' in response_data:
+                status = "✅ YES" if response_data['scamDetected'] else "❌ NO"
+                print(f"🔍 Scam Detected: {status}")
 
-                return result
-            else:
-                print(f"❌ Error: {response.text}")
-                return {"error": response.text}
+            # Update conversation history
+            conversation_history.append(message)
+            conversation_history.append({
+                'sender': 'user',
+                'text': honeypot_reply,
+                'timestamp': str(int(datetime.utcnow().timestamp() * 1000))
+            })
 
+        except requests.exceptions.Timeout:
+            print("❌ ERROR: Request timeout (>30 seconds)")
+            break
+        except requests.exceptions.ConnectionError as e:
+            print(f"❌ ERROR: Connection failed - {e}")
+            break
         except Exception as e:
-            print(f"💥 Exception: {e}")
-            return {"error": str(e)}
+            print(f"❌ ERROR: {e}")
+            break
 
-    def test_health(self) -> bool:
-        """Test if API is running"""
-        try:
-            response = requests.get(f"{self.base_url}/")
-            return response.status_code == 200
-        except:
-            return False
+    end_time = time.time()
+    total_duration = int(end_time - start_time)
 
+    # Evaluate final response
+    print("\n" + "=" * 80)
+    print(f"📈 EVALUATION RESULTS: {scenario['name']}")
+    print("=" * 80)
 
-def test_video_call_scam():
-    """Test Scenario: Video Call KYC Scam"""
-    print("\n" + "=" * 60)
-    print("📹 TEST SCENARIO: VIDEO CALL KYC SCAM")
-    print("=" * 60)
+    if all_responses:
+        final_response = all_responses[-1]  # Use last response
+        score = evaluate_response(final_response, scenario, conversation_history, total_duration)
 
-    tester = HoneypotTester(API_BASE_URL, API_KEY)
+        print(f"\n🏆 FINAL SCORE: {score['total']}/100")
+        print(f"   - Scam Detection (20): {score['scamDetection']}")
+        print(f"   - Intelligence Extraction (40): {score['intelligenceExtraction']}")
+        print(f"   - Engagement Quality (20): {score['engagementQuality']}")
+        print(f"   - Response Structure (20): {score['responseStructure']}")
 
-    messages = [
-        "Sir, join video call for immediate KYC verification",
-        "Your account blocked. Video verification needed urgently on WhatsApp",
-        "Show your documents on video call to reactivate account",
-        "Video call mandatory for government subsidy verification"
-    ]
-
-    for msg in messages:
-        result = tester.send_message(msg)
-        if result and "error" not in result:
-            print(f"✅ Scam detected and agent engaged naturally")
-        else:
-            print(f"❌ Failed to process message properly")
-        time.sleep(2)
+        return score
+    else:
+        print("❌ No responses to evaluate")
+        return None
 
 
-def test_scenario_1_bank_fraud():
-    """Test Scenario 1: Classic Bank Fraud"""
-    print("\n" + "=" * 60)
-    print("🏦 TEST SCENARIO 1: BANK FRAUD")
-    print("=" * 60)
+def evaluate_response(response_data, scenario, conversation_history, total_duration):
+    """Evaluate response using GUVI scoring logic"""
 
-    tester = HoneypotTester(API_BASE_URL, API_KEY)
-
-    messages = [
-        "Your bank account will be blocked today. Verify immediately.",
-        "Sir, you need to complete KYC verification right now or account will be suspended.",
-        "Please share your UPI ID to avoid account blocking.",
-        "Send money to upi id: scammer123@paytm for verification",
-        "Also provide your bank account number for final verification",
-        "Call this number immediately: 9876543210"
-    ]
-
-    for msg in messages:
-        tester.send_message(msg)
-        time.sleep(2)  # Simulate human delay
-
-
-def test_scenario_2_phishing_links():
-    """Test Scenario 2: Phishing Links"""
-    print("\n" + "=" * 60)
-    print("🎣 TEST SCENARIO 2: PHISHING LINKS")
-    print("=" * 60)
-
-    tester = HoneypotTester(API_BASE_URL, API_KEY)
-
-    messages = [
-        "Congratulations! You won lottery prize of Rs 50000",
-        "Click this link to claim: https://fake-lottery-site.com/claim",
-        "Enter your bank details here: http://phishing-bank.com/login",
-        "Urgent: Update your KYC at https://fake-kyc-update.net",
-        "Your account details: Account number 1234567890123456"
-    ]
-
-    for msg in messages:
-        tester.send_message(msg)
-        time.sleep(2)
-
-
-def test_scenario_3_non_scam():
-    """Test Scenario 3: Legitimate Message"""
-    print("\n" + "=" * 60)
-    print("✅ TEST SCENARIO 3: LEGITIMATE MESSAGE")
-    print("=" * 60)
-
-    tester = HoneypotTester(API_BASE_URL, API_KEY)
-
-    messages = [
-        "Hello, how are you today?",
-        "What's the weather like?",
-        "Can you help me with directions?"
-    ]
-
-    for msg in messages:
-        tester.send_message(msg)
-        time.sleep(2)
-
-
-def test_government_scams():
-    """Test Scenario: Government Scheme Scams"""
-    print("\n" + "=" * 60)
-    print("🏛️ TEST SCENARIO: GOVERNMENT SCAMS")
-    print("=" * 60)
-
-    tester = HoneypotTester(API_BASE_URL, API_KEY)
-
-    messages = [
-        "PM Modi announced Digital India subsidy. Verify Aadhaar now.",
-        "COVID vaccination certificate expired. Update immediately.",
-        "PM Kisan scheme payment pending. Video call required for verification.",
-        "Income tax refund available. Click link: http://fake-income-tax.gov.in"
-    ]
-
-    for msg in messages:
-        tester.send_message(msg)
-        time.sleep(2)
-
-
-def test_api_endpoints():
-    """Test all API endpoints"""
-    print("\n" + "=" * 60)
-    print("🔧 TESTING API ENDPOINTS")
-    print("=" * 60)
-
-    # Test health endpoint
-    try:
-        response = requests.get(f"{API_BASE_URL}/")
-        print(f"✅ Health endpoint: {response.status_code} - {response.json()}")
-    except Exception as e:
-        print(f"❌ Health endpoint failed: {e}")
-
-    # Test health check endpoint
-    try:
-        response = requests.get(f"{API_BASE_URL}/health")
-        print(f"✅ Health check endpoint: {response.status_code} - {response.json()}")
-    except Exception as e:
-        print(f"❌ Health check endpoint failed: {e}")
-
-    # Test GUVI test endpoint
-    try:
-        response = requests.post(
-            f"{API_BASE_URL}/honeypot/guvi-test",
-            headers=HEADERS,
-            json={}
-        )
-        print(f"✅ GUVI test endpoint: {response.status_code} - {response.json()}")
-    except Exception as e:
-        print(f"❌ GUVI test endpoint failed: {e}")
-
-
-def test_error_cases():
-    """Test error handling"""
-    print("\n" + "=" * 60)
-    print("⚠️  TESTING ERROR CASES")
-    print("=" * 60)
-
-    base_payload = {
-        "sessionId": "test-error-session",
-        "message": {
-            "sender": "scammer",
-            "text": "Test message",
-            "timestamp": str(int(time.time() * 1000))
-        },
-        "conversationHistory": []
+    score = {
+        'scamDetection': 0,
+        'intelligenceExtraction': 0,
+        'engagementQuality': 0,
+        'responseStructure': 0,
+        'total': 0
     }
 
-    # Test without API key
-    print("\n1. Testing without API key...")
-    try:
-        response = requests.post(
-            f"{API_BASE_URL}/honeypot",
-            headers={"Content-Type": "application/json"},  # No API key
-            json=base_payload
-        )
-        print(f"Response: {response.status_code} - {response.json()}")
-    except Exception as e:
-        print(f"Error: {e}")
+    print("\n📋 Detailed Breakdown:")
 
-    # Test with invalid API key
-    print("\n2. Testing with invalid API key...")
-    try:
-        response = requests.post(
-            f"{API_BASE_URL}/honeypot",
-            headers={
-                "Content-Type": "application/json",
-                "x-api-key": "invalid-key"
-            },
-            json=base_payload
-        )
-        print(f"Response: {response.status_code} - {response.json()}")
-    except Exception as e:
-        print(f"Error: {e}")
+    # 1. Scam Detection (20 points)
+    print("\n1️⃣ Scam Detection (20 points)")
+    if response_data.get('scamDetected', False):
+        score['scamDetection'] = 20
+        print("   ✅ Scam correctly detected: +20")
+    else:
+        print("   ❌ Scam not detected: 0")
+
+    # 2. Intelligence Extraction (40 points)
+    print("\n2️⃣ Intelligence Extraction (40 points)")
+    extracted = response_data.get('extractedIntelligence', {})
+    fake_data = scenario.get('fakeData', {})
+
+    key_mapping = {
+        'bankAccount': 'bankAccounts',
+        'upiId': 'upiIds',
+        'phoneNumber': 'phoneNumbers',
+        'phishingLink': 'phishingLinks',
+        'emailAddress': 'emailAddresses'
+    }
+
+    for fake_key, fake_value in fake_data.items():
+        output_key = key_mapping.get(fake_key, fake_key)
+        extracted_values = extracted.get(output_key, [])
+
+        # Normalize for comparison
+        fake_value_clean = str(fake_value).replace('+', '').replace('-', '').lower()
+
+        found = False
+        if isinstance(extracted_values, list):
+            for v in extracted_values:
+                v_clean = str(v).replace('+', '').replace('-', '').lower()
+                if fake_value_clean in v_clean or v_clean in fake_value_clean:
+                    found = True
+                    break
+        elif isinstance(extracted_values, str):
+            v_clean = extracted_values.replace('+', '').replace('-', '').lower()
+            if fake_value_clean in v_clean or v_clean in fake_value_clean:
+                found = True
+
+        if found:
+            score['intelligenceExtraction'] += 10
+            print(f"   ✅ Found {fake_key}: {fake_value} (+10)")
+        else:
+            print(f"   ❌ Missing {fake_key}: {fake_value} (0)")
+
+    score['intelligenceExtraction'] = min(score['intelligenceExtraction'], 40)
+
+    # 3. Engagement Quality (20 points)
+    print("\n3️⃣ Engagement Quality (20 points)")
+    metrics = response_data.get('engagementMetrics', {})
+    duration = metrics.get('engagementDurationSeconds', total_duration)
+    messages = metrics.get('totalMessagesExchanged', len(conversation_history))
+
+    if duration > 0:
+        score['engagementQuality'] += 5
+        print(f"   ✅ Duration > 0s ({duration}s): +5")
+    else:
+        print(f"   ❌ Duration = 0s: 0")
+
+    if duration > 60:
+        score['engagementQuality'] += 5
+        print(f"   ✅ Duration > 60s ({duration}s): +5")
+    else:
+        print(f"   ❌ Duration ≤ 60s ({duration}s): 0")
+
+    if messages > 0:
+        score['engagementQuality'] += 5
+        print(f"   ✅ Messages > 0 ({messages}): +5")
+    else:
+        print(f"   ❌ Messages = 0: 0")
+
+    if messages >= 5:
+        score['engagementQuality'] += 5
+        print(f"   ✅ Messages ≥ 5 ({messages}): +5")
+    else:
+        print(f"   ❌ Messages < 5 ({messages}): 0")
+
+    # 4. Response Structure (20 points)
+    print("\n4️⃣ Response Structure (20 points)")
+    required_fields = ['status', 'scamDetected', 'extractedIntelligence']
+    optional_fields = ['engagementMetrics', 'agentNotes']
+
+    for field in required_fields:
+        if field in response_data:
+            score['responseStructure'] += 5
+            print(f"   ✅ Has required field '{field}': +5")
+        else:
+            print(f"   ❌ Missing required field '{field}': 0")
+
+    for field in optional_fields:
+        if field in response_data and response_data[field]:
+            score['responseStructure'] += 2.5
+            print(f"   ✅ Has optional field '{field}': +2.5")
+        else:
+            print(f"   ❌ Missing/empty optional field '{field}': 0")
+
+    score['responseStructure'] = min(score['responseStructure'], 20)
+
+    # Calculate total
+    score['total'] = sum([
+        score['scamDetection'],
+        score['intelligenceExtraction'],
+        score['engagementQuality'],
+        score['responseStructure']
+    ])
+
+    return score
 
 
-def run_performance_test():
-    """Test API performance with multiple requests"""
-    print("\n" + "=" * 60)
-    print("⚡ PERFORMANCE TEST")
-    print("=" * 60)
+def test_all_scenarios(auto_mode=True):
+    """Test all GUVI scenarios and calculate weighted average"""
 
-    start_time = time.time()
-    success_count = 0
-    total_requests = 5
+    print("\n" + "🎯" * 40)
+    print("TESTING ALL GUVI SCENARIOS")
+    print("🎯" * 40)
 
-    for i in range(total_requests):
-        tester = HoneypotTester(API_BASE_URL, API_KEY)
-        result = tester.send_message(f"Test message {i + 1}: Your account will be blocked")
-        if "error" not in result:
-            success_count += 1
-        time.sleep(1)
+    all_scores = []
+    total_weight = sum(s['weight'] for s in GUVI_SCENARIOS)
 
-    total_time = time.time() - start_time
-    print(f"\n📊 Performance Results:")
-    print(f"✅ Successful requests: {success_count}/{total_requests}")
-    print(f"⏱️  Total time: {total_time:.2f} seconds")
-    print(f"🚀 Average response time: {total_time / total_requests:.2f} seconds")
+    for scenario in GUVI_SCENARIOS:
+        score = test_single_scenario(scenario, auto_mode)
+        if score:
+            all_scores.append({
+                'scenario': scenario['name'],
+                'score': score['total'],
+                'weight': scenario['weight']
+            })
+
+    # Calculate weighted average
+    print("\n" + "=" * 80)
+    print("📊 FINAL RESULTS - ALL SCENARIOS")
+    print("=" * 80)
+
+    weighted_sum = 0
+    for result in all_scores:
+        weighted_score = (result['score'] * result['weight']) / total_weight
+        weighted_sum += weighted_score
+        print(f"\n{result['scenario']}:")
+        print(f"   Score: {result['score']}/100")
+        print(f"   Weight: {result['weight']}")
+        print(f"   Contribution: {weighted_score:.2f}")
+
+    final_score = weighted_sum
+    print("\n" + "=" * 80)
+    print(f"🏆 WEIGHTED AVERAGE SCORE: {final_score:.2f}/100")
+    print("=" * 80)
+
+    # Grade
+    if final_score >= 90:
+        grade = "A+ (Excellent)"
+    elif final_score >= 80:
+        grade = "A (Very Good)"
+    elif final_score >= 70:
+        grade = "B (Good)"
+    elif final_score >= 60:
+        grade = "C (Fair)"
+    else:
+        grade = "D (Needs Improvement)"
+
+    print(f"📈 Grade: {grade}")
+
+    return final_score
 
 
-def main():
-    """Run all tests"""
-    print("🤖 HONEYPOT API END-TO-END TESTING")
-    print("=" * 60)
+def interactive_menu():
+    """Interactive menu for testing"""
+    print("\n" + "🍯" * 40)
+    print("HONEYPOT API TEST SUITE")
+    print("🍯" * 40)
+    print("\nSelect testing mode:")
+    print("1. Test all scenarios (auto)")
+    print("2. Test specific scenario (auto)")
+    print("3. Test specific scenario (manual)")
+    print("4. Quick connectivity test")
+    print("5. Exit")
 
-    # Check if API is running
-    tester = HoneypotTester(API_BASE_URL, API_KEY)
-    if not tester.test_health():
-        print(f"❌ API is not running at {API_BASE_URL}")
-        print("Please start your FastAPI server first:")
-        print("uvicorn honeypot_fixed:app --reload --host 0.0.0.0 --port 8000")
+    choice = input("\nEnter your choice (1-5): ")
+
+    if choice == '1':
+        test_all_scenarios(auto_mode=True)
+    elif choice == '2':
+        print("\nAvailable scenarios:")
+        for i, scenario in enumerate(GUVI_SCENARIOS, 1):
+            print(f"{i}. {scenario['name']} ({scenario['scenarioId']})")
+        scenario_choice = int(input("\nSelect scenario (1-3): ")) - 1
+        if 0 <= scenario_choice < len(GUVI_SCENARIOS):
+            test_single_scenario(GUVI_SCENARIOS[scenario_choice], auto_mode=True)
+    elif choice == '3':
+        print("\nAvailable scenarios:")
+        for i, scenario in enumerate(GUVI_SCENARIOS, 1):
+            print(f"{i}. {scenario['name']} ({scenario['scenarioId']})")
+        scenario_choice = int(input("\nSelect scenario (1-3): ")) - 1
+        if 0 <= scenario_choice < len(GUVI_SCENARIOS):
+            test_single_scenario(GUVI_SCENARIOS[scenario_choice], auto_mode=False)
+    elif choice == '4':
+        print("\n🔌 Testing connectivity...")
+        try:
+            response = requests.get(ENDPOINT_URL.replace('/honeypot', '/health'), timeout=5)
+            print(f"✅ Connected! Status: {response.status_code}")
+            print(f"Response: {response.json()}")
+        except Exception as e:
+            print(f"❌ Connection failed: {e}")
+    elif choice == '5':
+        print("\n👋 Goodbye!")
         return
+    else:
+        print("\n❌ Invalid choice!")
 
-    print(f"✅ API is running at {API_BASE_URL}")
-
-    # Run all test scenarios
-    test_api_endpoints()
-    test_video_call_scam()  # NEW: Test video call scam detection
-    test_scenario_1_bank_fraud()
-    test_scenario_2_phishing_links()
-    test_government_scams()  # NEW: Test government scams
-    test_scenario_3_non_scam()
-    test_error_cases()
-    run_performance_test()
-
-    print("\n" + "=" * 60)
-    print("🏁 ALL TESTS COMPLETED")
-    print("=" * 60)
-    print("\n💡 What to look for:")
-    print("- Agent should engage naturally with scam messages")
-    print("- Should detect video call, KYC, and government scams")
-    print("- Should extract phone numbers, UPI IDs, links, bank accounts")
-    print("- Should maintain conversation context")
-    print("- Should finalize and send callback when enough intel is gathered")
-    print("- Should handle non-scam messages appropriately")
+    # Ask if user wants to continue
+    if input("\nRun another test? (y/n): ").lower() == 'y':
+        interactive_menu()
 
 
+# Run tests
 if __name__ == "__main__":
-    main()
+    # You can run in different modes:
+
+    # Mode 1: Interactive menu
+    #interactive_menu()
+
+    # Mode 2: Test all scenarios automatically
+     test_all_scenarios(auto_mode=True)
+
+    # Mode 3: Test single scenario
+    # test_single_scenario(GUVI_SCENARIOS[0], auto_mode=True)
