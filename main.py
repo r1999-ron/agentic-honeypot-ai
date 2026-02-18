@@ -1,7 +1,9 @@
+import logging
 import os
 import random
 import re
 import time
+from collections import defaultdict
 from threading import Thread
 from typing import List, Optional, Union
 
@@ -98,6 +100,7 @@ session_start_time = {}
 session_is_scam = {}
 session_final_output = {}
 session_finalized = {}
+session_message_count = defaultdict(lambda: {"count": 0, "window_start": time.time()})
 
 # ==================== SESSION CLEANUP ====================
 
@@ -113,6 +116,7 @@ def cleanup_old_sessions():
         session_intelligence.pop(sid, None)
         session_start_time.pop(sid, None)
         session_is_scam.pop(sid, None)
+        session_message_count.pop(sid, None)
         print(f"🧹 Cleaned up expired session: {sid}")
 
 
@@ -136,11 +140,17 @@ class HoneypotRequest(BaseModel):
     conversationHistory: List[Message] = []
     metadata: Optional[Metadata] = None
 
-
 class HoneypotResponse(BaseModel):
     status: str
-    reply: str
+    reply: Optional[str] = None
 
+    # Final output fields (optional during conversation)
+    sessionId: Optional[str] = None
+    scamDetected: Optional[bool] = None
+    totalMessagesExchanged: Optional[int] = None
+    extractedIntelligence: Optional[dict] = None
+    engagementMetrics: Optional[dict] = None
+    agentNotes: Optional[str] = None
 
 # ==================== SCAM DETECTION DATA ====================
 
@@ -468,7 +478,6 @@ def build_final_output(session_id):
     messages = len(session_memory[session_id])
 
     return {
-        "status": "completed",
         "sessionId": session_id,
         "scamDetected": session_is_scam[session_id],
         "totalMessagesExchanged": messages,
@@ -533,11 +542,32 @@ def should_finalize(session_id):
     duration = time.time() - session_start_time[session_id]
 
     return (
-        (msgs >= 6 and intel_types >= 1) or  # Ideal completion
-        msgs >= MAX_TURNS or                 # Conversation limit
-        duration > 600 or                    # Timeout
-        (intel_types >= 2 and msgs >= 4)     # High-value intel early
+            (msgs >= 6 and intel_types >= 1 and duration > 30) or
+            msgs >= MAX_TURNS or
+            duration > 600 or
+            (intel_types >= 2 and msgs >= 5)
     )
+
+# ==================== RATE LIMITING ====================
+
+def check_rate_limit(session_id, max_messages=15, window_seconds=60):
+    """Prevent message spam - returns True if allowed, False if blocked"""
+    current_time = time.time()
+    session_data = session_message_count[session_id]
+
+    # Reset window if expired
+    if current_time - session_data["window_start"] > window_seconds:
+        session_data["count"] = 0
+        session_data["window_start"] = current_time
+
+    # Increment and check
+    session_data["count"] += 1
+
+    if session_data["count"] > max_messages:
+        print(f"Rate limit exceeded for session {session_id}")
+        return False
+
+    return True
 
 # ==================== API ENDPOINT ====================
 
@@ -552,10 +582,14 @@ def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
 
     session_id = request.sessionId
 
+    # Rate limiting
+    if not check_rate_limit(session_id):
+        raise HTTPException(status_code=429, detail="Too many messages. Please slow down.")
+
     # Initialize session
     if session_id not in session_memory:
         initialize_session(session_id, request.conversationHistory)
-        session_finalized[session_id] = False   # 🔥 IMPORTANT
+        session_finalized[session_id] = False
 
     # Add scammer message
     session_memory[session_id].append({
@@ -567,29 +601,14 @@ def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
 
     # Detect scam
     detected, confidence = detect_scam(request.message.text)
-
     if detected:
         session_is_scam[session_id] = True
 
-    is_scam = session_is_scam.get(session_id, False)
-
-    # Soft suspicion check
-    text_norm = normalize_text(request.message.text)
-    soft_signal_present = any(s in text_norm for s in SOFT_SIGNALS)
-    bank_present = any(b in text_norm for b in BANK_ENTITIES)
-    soft_suspicion = soft_signal_present and bank_present
-
     # Generate reply
-    if is_scam or soft_suspicion:
-        agent_reply = generate_agent_reply(
-            session_memory[session_id],
-            request.metadata
-        )
-    else:
-        agent_reply = generate_agent_reply(
-            session_memory[session_id],
-            request.metadata
-        )
+    agent_reply = generate_agent_reply(
+        session_memory[session_id],
+        request.metadata
+    )
 
     session_memory[session_id].append({
         "role": "assistant",
@@ -614,11 +633,11 @@ def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
             final_output = build_final_output(session_id)
 
             session_final_output[session_id] = final_output
+            session_finalized[session_id] = True
 
             print("FINAL OUTPUT:", final_output)
+    # ================= NORMAL REPLY =================
 
-            session_finalized[session_id] = True
-    # REQUIRED RESPONSE FORMAT (VERY IMPORTANT)
     return {
         "status": "success",
         "reply": agent_reply
