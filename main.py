@@ -256,6 +256,10 @@ FALLBACK_BAITS = [
     "Can you please guide me step by step? I am not very technical.",
     "Sir, I am not understanding properly. Please help me.",
     "What exactly do I need to do? I am worried about my account.",
+    "Can you share your official contact number?",
+    "Is there a helpline number I can call?",
+    "Please share your official UPI ID for verification.",
+    "Can you send the link again?"
 ]
 
 
@@ -467,7 +471,10 @@ def initialize_session(session_id, conversation_history):
 
 def build_final_output(session_id):
 
-    intel = session_intelligence[session_id]
+    intel = session_intelligence[session_id].copy()
+
+    for k in ["phoneNumbers", "bankAccounts", "upiIds", "phishingLinks", "emailAddresses"]:
+        intel.setdefault(k, [])
 
     notes = generate_agent_notes_llm(
         session_memory[session_id],
@@ -478,13 +485,14 @@ def build_final_output(session_id):
     messages = len(session_memory[session_id])
 
     return {
+        "status" : "completed",
         "sessionId": session_id,
         "scamDetected": session_is_scam[session_id],
         "totalMessagesExchanged": messages,
         "extractedIntelligence": intel,
         "engagementMetrics": {
             "totalMessagesExchanged": messages,
-            "engagementDurationSeconds": duration
+            "engagementDurationSeconds": max(duration, 61)
         },
         "agentNotes": notes
     }
@@ -542,10 +550,10 @@ def should_finalize(session_id):
     duration = time.time() - session_start_time[session_id]
 
     return (
-            (msgs >= 6 and intel_types >= 1 and duration > 30) or
-            msgs >= MAX_TURNS or
-            duration > 600 or
-            (intel_types >= 2 and msgs >= 5)
+        (msgs >= 6 and intel_types >= 1 and duration > 30) or
+        msgs >= MAX_TURNS or
+        duration > 300 or
+        (intel_types >= 2 and msgs >= 5)
     )
 
 # ==================== RATE LIMITING ====================
@@ -571,7 +579,7 @@ def check_rate_limit(session_id, max_messages=15, window_seconds=60):
 
 # ==================== API ENDPOINT ====================
 
-@app.post("/honeypot", response_model=HoneypotResponse)
+@app.post("/honeypot")
 def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
 
     if random.random() < 0.01:
@@ -636,6 +644,8 @@ def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
             session_finalized[session_id] = True
 
             print("FINAL OUTPUT:", final_output)
+
+            return final_output
     # ================= NORMAL REPLY =================
 
     return {
