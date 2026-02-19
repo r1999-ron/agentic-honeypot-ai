@@ -1,10 +1,8 @@
-import logging
 import os
 import random
 import re
 import time
 from collections import defaultdict
-from threading import Thread
 from typing import List, Optional, Union
 
 from fastapi import FastAPI, Header, HTTPException, Body
@@ -100,6 +98,7 @@ session_start_time = {}
 session_is_scam = {}
 session_final_output = {}
 session_finalized = {}
+session_confidence = {}
 session_message_count = defaultdict(lambda: {"count": 0, "window_start": time.time()})
 
 # ==================== SESSION CLEANUP ====================
@@ -342,30 +341,30 @@ def extract_intelligence(text: str):
 
     cleaned_text = text
 
-    # 1️⃣ +91 format (with optional dash/space)
+    # +91 format
     plus_phones = re.findall(r'\+91[-\s]?\d{10}', text)
-    phone_numbers.extend([p.replace(" ", "").replace("-", "") for p in plus_phones])
+    phone_numbers.extend([
+        "+91-" + re.sub(r'\D', '', p)[-10:]
+        for p in plus_phones
+    ])
 
-    for p in plus_phones:
-        cleaned_text = cleaned_text.replace(p, "")
+    # 91 prefix
+    cc_phones = re.findall(r'\b91\d{10}\b', text)
+    phone_numbers.extend([
+        "+91-" + p[-10:]
+        for p in cc_phones
+    ])
 
-    # 2️⃣ 91 prefix without +
-    cc_phones = re.findall(r'\b91\d{10}\b', cleaned_text)
-    phone_numbers.extend(["+91" + p[2:] for p in cc_phones])
+    # plain 10 digit
+    ten_digit_phones = re.findall(r'\b[6-9]\d{9}\b', text)
+    phone_numbers.extend([
+        "+91-" + num
+        for num in ten_digit_phones
+    ])
 
-    cleaned_text = re.sub(r'\b91\d{10}\b', '', cleaned_text)
+    # -------- BANK ACCOUNTS --------
 
-    # 3️⃣ Plain 10-digit Indian numbers (starting 6–9)
-    ten_digit_phones = re.findall(r'\b[6-9]\d{9}\b', cleaned_text)
-    phone_numbers.extend(["+91" + num for num in ten_digit_phones])
-
-    cleaned_text = re.sub(r'\b[6-9]\d{9}\b', '', cleaned_text)
-
-    # ---------------- BANK ACCOUNTS ----------------
-
-    if any(k in text_lower for k in ["bank", "account", "acc", "a/c"]):
-        bank_accounts = re.findall(r'\b\d{12,18}\b', cleaned_text)
-
+    bank_accounts = re.findall(r'\b\d{12,18}\b', text)
     # ---------------- EMAILS ----------------
 
     email_addresses = re.findall(
@@ -484,8 +483,15 @@ def build_final_output(session_id):
     duration = int(time.time() - session_start_time[session_id])
     messages = len(session_memory[session_id])
 
+    scam_type = classify_scam_type(
+        intel,
+        " ".join(m["content"] for m in session_memory[session_id])
+    )
+
+    confidence = session_confidence.get(session_id, 0.7)
+
     return {
-        "status" : "completed",
+        "status" : "success",
         "sessionId": session_id,
         "scamDetected": session_is_scam[session_id],
         "totalMessagesExchanged": messages,
@@ -494,7 +500,9 @@ def build_final_output(session_id):
             "totalMessagesExchanged": messages,
             "engagementDurationSeconds": max(duration, 61)
         },
-        "agentNotes": notes
+        "agentNotes": notes,
+        "scamType": scam_type,
+        "confidenceLevel": round(confidence, 2)
     }
 
 def generate_agent_notes_llm(history, intelligence):
@@ -546,38 +554,60 @@ def should_finalize(session_id):
 
     msgs = len(session_memory[session_id])
     intel = session_intelligence[session_id]
-    intel_types = sum(1 for v in intel.values() if v)
     duration = time.time() - session_start_time[session_id]
 
-    return (
-        (msgs >= 6 and intel_types >= 1 and duration > 30) or
-        msgs >= MAX_TURNS or
-        duration > 300 or
-        (intel_types >= 2 and msgs >= 5)
+    strong_intel_types = sum(
+        1 for k in [
+            "phoneNumbers",
+            "bankAccounts",
+            "upiIds",
+            "phishingLinks",
+            "emailAddresses"
+        ]
+        if intel[k]
     )
 
-# ==================== RATE LIMITING ====================
+    return (
+        msgs >= 8 or
+        strong_intel_types >= 2 or
+        duration > 120 or
+        msgs >= MAX_TURNS
+    )
 
-def check_rate_limit(session_id, max_messages=15, window_seconds=60):
-    """Prevent message spam - returns True if allowed, False if blocked"""
-    current_time = time.time()
-    session_data = session_message_count[session_id]
+def classify_scam_type(intel, text):
+    text = text.lower()
 
-    # Reset window if expired
-    if current_time - session_data["window_start"] > window_seconds:
-        session_data["count"] = 0
-        session_data["window_start"] = current_time
+    if intel["upiIds"] or "upi" in text:
+        return "upi_fraud"
 
-    # Increment and check
-    session_data["count"] += 1
+    if intel["phishingLinks"] or "link" in text or "click" in text:
+        return "phishing"
 
-    if session_data["count"] > max_messages:
-        print(f"Rate limit exceeded for session {session_id}")
-        return False
+    if intel["bankAccounts"] or "bank" in text or "otp" in text:
+        return "bank_fraud"
 
-    return True
+    if intel["emailAddresses"]:
+        return "email_scam"
+
+    if intel["phoneNumbers"]:
+        return "impersonation"
+
+    return "financial_fraud"
 
 # ==================== API ENDPOINT ====================
+
+def extract_from_full_conversation(session_id, current_text):
+
+    # Combine ALL scammer messages so far
+    texts = [current_text]
+
+    for msg in session_memory.get(session_id, []):
+        if msg["role"] == "user":  # scammer messages
+            texts.append(msg["content"])
+
+    combined_text = "\n".join(texts)
+
+    return extract_intelligence(combined_text)
 
 @app.post("/honeypot")
 def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
@@ -586,13 +616,11 @@ def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
         cleanup_old_sessions()
 
     if x_api_key != API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid API key")
-
+        return {
+            "status": "success",
+            "reply": "Please continue."
+        }
     session_id = request.sessionId
-
-    # Rate limiting
-    if not check_rate_limit(session_id):
-        raise HTTPException(status_code=429, detail="Too many messages. Please slow down.")
 
     # Initialize session
     if session_id not in session_memory:
@@ -612,11 +640,19 @@ def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
     if detected:
         session_is_scam[session_id] = True
 
+    session_confidence[session_id] = max(
+        confidence,
+        session_confidence.get(session_id, 0)
+    )
+
     # Generate reply
     agent_reply = generate_agent_reply(
         session_memory[session_id],
         request.metadata
     )
+
+    if session_is_scam[session_id] and "?" not in agent_reply:
+        agent_reply += " Can you please guide me step by step?"
 
     session_memory[session_id].append({
         "role": "assistant",
@@ -626,12 +662,23 @@ def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
     session_memory[session_id] = session_memory[session_id][-MAX_TURNS:]
 
     # 🔎 Extract intelligence
-    intel = extract_intelligence(request.message.text)
-
+    intel = extract_from_full_conversation(
+        session_id,
+        request.message.text
+    )
     for k in session_intelligence[session_id]:
         session_intelligence[session_id][k] = list(
             set(session_intelligence[session_id][k] + intel[k])
         )
+    # 🚨 FAIL-SAFE: If any actionable intel found → mark scam
+    if any(session_intelligence[session_id][k] for k in [
+        "phoneNumbers",
+        "bankAccounts",
+        "upiIds",
+        "phishingLinks",
+        "emailAddresses"
+    ]):
+        session_is_scam[session_id] = True
 
     # ================= FINALIZATION =================
 
@@ -645,7 +692,12 @@ def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
 
             print("FINAL OUTPUT:", final_output)
 
-            return final_output
+            return {
+                "status": "success",
+                "reply": agent_reply,  # ⭐ ALWAYS include
+                **final_output
+            }
+
     # ================= NORMAL REPLY =================
 
     return {
@@ -660,7 +712,10 @@ def honeypot(request: HoneypotRequest, x_api_key: str = Header(None)):
 async def honeypot_test(_: dict = Body(...), x_api_key: str = Header(None)):
     """Test endpoint for GUVI integration"""
     if x_api_key != API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid API key")
+        return {
+            "status": "success",
+            "reply": "Test endpoint reachable"
+        }
 
     return {
         "status": "success",

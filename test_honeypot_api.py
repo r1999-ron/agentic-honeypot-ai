@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 
 # Your API configuration
-ENDPOINT_URL = "http://localhost:8001/honeypot"
+ENDPOINT_URL = "https://agentic-honeypot-ai-production.up.railway.app/honeypot"
 API_KEY = "sk_test_123456789"  # Optional
 
 AUTO_MESSAGES_MAP = {
