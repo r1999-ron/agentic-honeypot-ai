@@ -491,15 +491,11 @@ def build_final_output(session_id):
     confidence = session_confidence.get(session_id, 0.7)
 
     return {
-        "status" : "success",
         "sessionId": session_id,
         "scamDetected": session_is_scam[session_id],
         "totalMessagesExchanged": messages,
+        "engagementDurationSeconds": max(duration, 61),
         "extractedIntelligence": intel,
-        "engagementMetrics": {
-            "totalMessagesExchanged": messages,
-            "engagementDurationSeconds": max(duration, 61)
-        },
         "agentNotes": notes,
         "scamType": scam_type,
         "confidenceLevel": round(confidence, 2)
