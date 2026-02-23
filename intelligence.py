@@ -119,25 +119,10 @@ def _upi_ids(text: str) -> list[str]:
 
 
 def _links(text: str) -> list[str]:
-    found = set()
-
-    # Standard http/https links
-    for m in re.finditer(r'https?://[^\s<>"]+', text, re.IGNORECASE):
-        found.add(m.group(0).rstrip('.,!?;:)"\''))
-
-    # Bare domains like fake-sbi-alert.com
-    for m in re.finditer(
-            r'(?<!@)\b(?:www\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,6}\b(?!@)',
-            text.lower()
-    ):
-        domain = m.group(0)
-
-        if domain.startswith("http"):
-            continue
-
-        found.add("http://" + domain)
-
-    return sorted(found)
+    # Only extract full URLs with http/https — don't guess bare domains
+    raw = re.findall(r'https?://[^\s<>")\]]+', text)
+    cleaned = [r.rstrip('.,!?;:\')"') for r in raw]
+    return list(set(cleaned))
 
 
 def _emails(text: str) -> list[str]:
@@ -174,7 +159,7 @@ def _order_numbers(text: str) -> list[str]:
         r'\b(?:ORD|ORDER|OD|AMZ|FK)[-/]?[A-Z0-9]{6,20}\b',
         r'\border\s*(?:no\.?|number|id)?\s*:?\s*[A-Z0-9]{6,20}\b',
         r'\b\d{3}-\d{7}-\d{7}\b',   # Amazon order format
-        r'[?&](?:id|order|ref|txn|transaction)=([A-Za-z0-9-]{3,20})'
+        #r'[?&](?:id|order|ref|txn|transaction)=([A-Za-z0-9-]{3,20})'
     ]
     results = []
     for p in patterns:
