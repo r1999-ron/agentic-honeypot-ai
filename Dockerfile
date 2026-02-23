@@ -1,20 +1,15 @@
-# 1️⃣ Base Python image
 FROM python:3.10-slim
 
-# 2️⃣ Set working directory
 WORKDIR /app
 
-# 3️⃣ Copy requirements first (for caching)
 COPY requirements.txt .
 
-# 4️⃣ Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 5️⃣ Copy application code
 COPY . .
 
-# 6️⃣ Expose port (FastAPI default)
+ENV PYTHONUNBUFFERED=1
+
 EXPOSE 8000
 
-# 7️⃣ Start FastAPI app
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
